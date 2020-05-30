@@ -42,8 +42,8 @@ Eppenhof EJ, Peña-Castillo L. (2019) [Prioritizing bona fide bacterial small RN
 
 
 
-#Getting Started
+# Getting Started
 
 ## Required libraries
-* H_20
+* H_O
 1. Download the 
