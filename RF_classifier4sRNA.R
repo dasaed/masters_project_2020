@@ -21,7 +21,6 @@ library("randomForest")
 library("h2o")
 
 
-
 # ORIGINAL SCRIPT ----
 #!/usr/bin/env Rscript
 library("optparse")
@@ -49,7 +48,7 @@ pred <- predict(RF, data, type = "prob")
 colnames(pred) <- c("No sRNA", "sRNA")
 write.table(pred, file = opt$out, sep = "\t", col.names = TRUE, row.names = TRUE)
 
-# Running the Model from script ----
+# Running the Model from within script ----
 inputFile <- "FeatureTable.tsv" # the sample file
 outputFile <- paste( "output_from_",inputFile, sep="" )
 RF <- readRDS("RF_classifier4sRNA.rds")
@@ -66,7 +65,7 @@ write.table(pred, file = outputFile, sep = "\t", col.names = TRUE, row.names = T
 
 
 singlePoint <- "singlePoint.tsv"
-headers <- c("Pos10wrtsRNAStart","DistTerm","Distance","sameStrand","DownDistance","sameDownStrand")
+headers <- c("SS","Pos10wrtsRNAStart","DistTerm","Distance","sameStrand","DownDistance","sameDownStrand")
 write.csv(headers, singlePoint, eol="\t", row.names = FALSE)
 cat("\n", file=singlePoint, append=TRUE)
 
@@ -86,16 +85,79 @@ singlePred <- predict(RF, myData, type = "prob")
 
 RF <- readRDS("RF_classifier4sRNA.rds") # Load the model
 
+instanceToTest <- list(-43.8,-36,1000,-38,1,153,0) # Load the instance
 predictSingleInstance <- function( singleInstance) {
-  instanceToTest <- list(-43.8,-36,1000,-38,1,153,0) # Load the instance
   singlePred <- predict(RF, instanceToTest, type = "prob") # Make Prediction
   colnames(singlePred) <- c("No sRNA", "sRNA") # adding header columns to the prediction output
   rownames(singlePred) <- c("sRNA00822")
   return(singlePred)
 }
+myPrediction <- predictSingleInstance(instanceToTest)
+myPrediction
 
 
-# Applying LIME ----
+# LIME Test ----
+install.packages("lime")
+library("lime")
+library("randomForest")
+RF <- readRDS("RF_classifier4sRNA.rds") # Load the model
+
+origTrainingData <- read.csv( "training_combined.csv", header = TRUE, sep = ",") # load Orig Training data
+class(origTrainingData)
+head(origTrainingData)
+length(origTrainingData)
+
+origTrainingDataLabels <- read.csv( "training_combined_labels.csv", header = TRUE, sep = "," ) # load Orig Training data labes
+class(origTrainingDataLabels)
+head(origTrainingDataLabels)
+classification <- origTrainingDataLabels$Class
+trainingDataWithLabels <- cbind(origTrainingData, classification)
+
+# instances to explain ----
+inputFile <- "FeatureTable.tsv"
+testData <- read.table( inputFile, sep = "\t", header = TRUE)
+class(testData)
+head(testData)
+length(testData)
+testDataPredictions <- predict(RF, testData, type="prob")
+testDataPredictions
+
+?lime()
+
+# randomForest
+# RF <- readRDS("RF_classifier4sRNA.rds")
+# pred <- predict(RF, data, type = "prob")
+predict_model.randomForest <- function(x, newdata, type, ...) {
+  res <- predict(x, newdata = newdata, ...)
+  switch(
+    type,
+    raw = data.frame(Response = res$class, stringsAsFactors = FALSE),
+    prob = as.data.frame(res["posterior"], check.names = FALSE)
+  )
+}
+
+model_type.randomForest <- function(x, ...) 'classification'
+
+origTrainingData
+lime_explainer <- lime( origTrainingData,             # Original training data
+                        RF,                       # The model to explain
+                        bin_continuous = TRUE,    # Should continuous variables be binned 
+                                                  # when making the explanation
+                        quantile_bins = FALSE     # Should the bins be based on n_bins quantiles
+                                                  # or spread evenly over the range of the training data
+                        )
+lime_explanations <- explain( testData,           # Data to explain
+                              lime_explainer,     # Explainer to use
+                              n_labels = 1,       # The number of labels to explain
+                              n_features = 4     # Number of permutations to use for each explanation
+                              )
+
+
+
+# Applying LIME using h2o----
+library("h2o")
+h2o.init()
+#h2o.no_progress() 
 
 
 # Clean up  ----
