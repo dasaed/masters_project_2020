@@ -94,23 +94,23 @@ trainData <- as.h2o(fullTrainingDataSet)
 
 # 2. Build model ----
 
+?h2o.randomForest()
 rfh2o <- h2o.randomForest( 
              training_frame = trainData,
              x = 1:7,                   # features to use to generate the prediction
              y = 9,                     # Class type -> what we want to predict
              model_id = "rf1_sRNA",     # name of model in h2o
-             ntrees = 1000,              # max number of trees  
+             ntrees = 400,              # max number of trees  
              seed = 1234,               # seed, has to be set WITHIN the h2o function
                                         # and it's supposed to be different from "R's seed", so 
                                         # results might not be exactly the same as orig model, but
                                         # should be similar enough
              mtries = 2,                 # Same as original model 
-             max_depth = 30,
-             verbose = TRUE
+             max_depth = 30
 )
-
-# 3. Preview Model's Performance ----
-
+rfh2o
+# 3. Preview H2O's RF Performance ----
+# This is the performance with the OOB error, based on the training process (ie training data)
 rfh2o@model$variable_importances
 h2o.varimp_plot(rfh2o)
 rfh2o_peformance <- h2o.performance(rfh2o)
@@ -139,11 +139,19 @@ evaluateData <- function(RF, data, labels){
   return(res)
 }
 
-origRF_performance <- evaluateData(origRF, dataSetTrainX, dataSetTrainY[,2])
-origRF_performance
-origRF_performance$auc@y.values
+origRF_slt2_performance <- evaluateData(origRF, slt2data[,-8], slt2data[,8])
+origRF_lu_performance <- evaluateData(origRF, ludata[,-8], ludata[,8])
 
-# 2. Get Predictions from the Models ----
+origRF_slt2_performance$auc@y.values
+origRF_lu_performance$auc@y.values
+
+
+# 3. Head to Head Model Comparison ----
+# In this section we'll get the predictions both models generate on the testing data LU and SLT2. The goal
+# of this section is not to prove which model is the best, but to prove that the models are similar enough
+# to the point that the analysis of the H2O model will be a valid analogy model for the original RF model. 
+
+# ..3.1 Get Testing Data Predictions from the Models ----
 
 origRF_lu_pred <- predict(origRF, ludata[,-8], type = "prob")
 origRF_slt2_pred <- predict(origRF, slt2data[,-8], type = "prob")
@@ -151,20 +159,8 @@ origRF_slt2_pred <- predict(origRF, slt2data[,-8], type = "prob")
 rfh2o_slt2_pred <- h2o.predict(object = rfh2o, newdata = as.h2o(slt2data[,-8]) )
 rfh2o_lu_pred <- h2o.predict(object = rfh2o, newdata = as.h2o(ludata[,-8]) )
 
-# 3. Build Comparison Tables ----
-
-slt2_predictions <-  cbind(as.data.frame(origRF_slt2_pred),         # Orig RF predictions 
-                           as.data.frame(rfh2o_slt2_pred[,c(2:3)]), # Orig RF predictions
-                           slt2data[,8]                             # Actual Value
-                           )
-colnames(slt2_predictions) <- c("OrigRF_F","OrigRF_T","RF_H2O_F","RF_H2O_T","Real_Value")
-
-lu_predictions <-  cbind(as.data.frame(origRF_lu_pred),
-                         as.data.frame(rfh2o_lu_pred[,c(2:3)]),
-                         ludata[,8]
-                         )
-colnames(lu_predictions) <- c("OrigRF_F","OrigRF_T","RF_H2O_F","RF_H2O_T","Real_Value")
-
+# ..3.2. Create a comparison function ----
+# This function is to simplify the comparison between the predictions from the Original RF model and the H2O RF model
 compareAnswers <- function(a,b,c){
   if ( a == c & b == c ){
     res="BOTH_RIGHT"
@@ -183,22 +179,67 @@ compareAnswers <- function(a,b,c){
   return(res)
 }
 
-slt2_predictions$origPreds <- ifelse( slt2_predictions$OrigRF_T >= 0.5, 1, 0)
-slt2_predictions$h2oPreds  <- ifelse( slt2_predictions$RF_H2O_T >= 0.5, 1, 0)
+# ..3.3. SLT2 comparisons ----
+slt2_predictions <-  cbind(as.data.frame(origRF_slt2_pred),         # Orig RF predictions 
+                           as.data.frame(rfh2o_slt2_pred[,c(2:3)]), # Orig RF predictions
+                           slt2data[,8]                             # Actual Value
+                           )
 
+colnames(slt2_predictions) <- c("OrigRF_F","OrigRF_T","RF_H2O_F","RF_H2O_T","Real_Value")
+
+
+slt2_predictions$origPreds <- ifelse( slt2_predictions$OrigRF_T >= 0.5, 1, 0) 
+slt2_predictions$h2oPreds  <- ifelse( slt2_predictions$RF_H2O_T >= 0.5, 1, 0) 
+
+slt2_predictions$Similarities <- NA
 
 for( i in 1:nrow(slt2_predictions) ){
+  # Based on the way we are feeding the values to the compareAnswers function, 
+  # Similiarities = OnlyA means that only the Orig RF got the right answer
+  # Similiarities = OnlyB means that only the H2O RF got the right answer
+  # All other answers will tell us where both models were right("BOTH_RIGHT"), or
+  # wrong ("BOTH_WRONG")
   slt2_predictions[i,]$Similarities <- compareAnswers(
-    slt2_predictions[i,]$origPreds,
-    slt2_predictions[i,]$h2oPreds,
-    slt2_predictions[i,]$Real_Value
+    slt2_predictions[i,]$origPreds,  
+    slt2_predictions[i,]$h2oPreds,  
+    slt2_predictions[i,]$Real_Value 
   )
-}
-head(slt2_predictions, 30)
+} 
+
+slt2_OnlyA <- slt2_predictions[slt2_predictions$Similarities == "OnlyA",] 
+slt2_OnlyB <- slt2_predictions[slt2_predictions$Similarities == "OnlyB",]
+nrow(slt2_OnlyA)
+nrow(slt2_OnlyB)
+
+# ..3.4.. LU Comparisons ----
+
+lu_predictions <-  cbind(as.data.frame(origRF_lu_pred),
+                         as.data.frame(rfh2o_lu_pred[,c(2:3)]),
+                         ludata[,8]
+)
+
+colnames(lu_predictions) <- c("OrigRF_F","OrigRF_T","RF_H2O_F","RF_H2O_T","Real_Value")
+
+lu_predictions$origPreds <- ifelse( lu_predictions$OrigRF_T >= 0.5, 1, 0)
+lu_predictions$h2oPreds  <- ifelse( lu_predictions$RF_H2O_T >= 0.5, 1, 0)
+
+lu_predictions$Similarities <- NA
+
+for( i in 1:nrow(lu_predictions) ){
+  lu_predictions[i,]$Similarities <- compareAnswers(
+    lu_predictions[i,]$origPreds,
+    lu_predictions[i,]$h2oPreds,
+    lu_predictions[i,]$Real_Value
+  )
+} 
+
+head(lu_predictions, 30)
+lu_OnlyA <- lu_predictions[lu_predictions$Similarities == "OnlyA",]
+lu_OnlyB <- lu_predictions[lu_predictions$Similarities == "OnlyB",]
+nrow(lu_OnlyA)
+nrow(lu_OnlyB)
 
 
-#write.csv(slt2_predictions, "./slt2_predictions.csv", row.names = FALSE)
-differences <-slt2_predictions[slt2_predictions$Comparison != "BOTH", ]
 
 # D) LIME ----
 # 1. Apply LIME to the new RF models ----
@@ -234,5 +275,7 @@ h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameDownStrand")
 
 
 
-# F) SHAPley??? ----
+# F) SHAP Values ----
 # 1. ----
+h2o.predict_contributions(rfh2o, as.h2o(slt2data[,-8]))
+
