@@ -11,20 +11,31 @@ remove(list = ls())
 # 2. Install and load libraries ----
 
 # uncomment the following lines if you need to install the libraries
-#install.packages("h2o")
-#install.packages("lime")
-#install.packages("ROCR")
-#install.packages("PRROC")
-#install.packages("tidyverse")
-#install.packages("ggplot2") 
-library("lime")       # ML local interpretation
-library("h2o")        # ML model building
-library("ROCR")       # ML evaluation
-library("PRROC")      # ML evaluation
-library("randomForest")
-library("tidyverse")
-library("ggplot2")
+# install.packages("lime")
+# install.packages("ROCR")
+# install.packages("PRROC")
+# install.packages("tidyverse")
+# install.packages("ggplot2") 
+library("lime")         # ML local interpretation
+library("ROCR")         # ML evaluation
+library("PRROC")        # ML evaluation
+library("randomForest") # ML model building
+#library("tidyverse")    # Graphing purposes
+library("ggplot2")      # Graphing purposes
 
+## The following is copied from the h2o documentation site, as it's their recommended way for
+## downloading and installing h2o for R (http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/index.html)
+## The following two commands remove any previously installed H2O packages for R.
+#if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
+#if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
+## Next, we download packages that H2O depends on.
+#pkgs <- c("RCurl","jsonlite")
+#for (pkg in pkgs) {
+#  if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+#}
+## Now we download, install and initialize the H2O package for R.
+#install.packages("h2o", type="source", repos="http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/R")
+library("h2o")          # ML model building
 
 # 3. Load and preprocess data ----
 
@@ -260,10 +271,13 @@ origRF_slt2_performance <- evaluateData(origRF, slt2data[,-8], slt2data[,8])
 origRF_lu_performance <- evaluateData(origRF, ludata[,-8], ludata[,8])
 
 # H2O RF Performance Metrics
+# H2O provides a way to retrieve most of the desired metrics
 # http://docs.h2o.ai/h2o/latest-stable/h2o-r/docs/reference/h2o.metric.html
+
 slt2data_h2o <- slt2data
 slt2data_h2o[,"Class"] <- as.logical(slt2data_h2o[,"Class"]) 
 rfh2o_slt2_performance <- h2o.performance(rfh2o, newdata = as.h2o(slt2data_h2o))
+
 ludata_h2o <- ludata
 ludata_h2o[,"Class"] <- as.logical(ludata_h2o[,"Class"]) 
 rfh2o_lu_performance <- h2o.performance(rfh2o, newdata = as.h2o(ludata_h2o))
@@ -287,7 +301,7 @@ metrics_table["rfh2o_lu_perf","Accuracy"] <- nrow(lu_predictions[lu_predictions$
                                     )/nrow(lu_predictions)
 
 metrics_table
-
+## Accuracy graph based on different thresholds("cutoff")
 plot(origRF_slt2_performance$acc, col = "blue") 
 lines(h2o.accuracy(rfh2o_slt2_performance), type = "l", col = "red")
 
@@ -304,41 +318,36 @@ metrics_table["rfh2o_lu_perf",  "AUCPR"] <- h2o.aucpr(rfh2o_lu_performance)
 
 metrics_table
 
-plot(origRF_slt2_performance$pr) 
-rfh2o_slt2_pr <- as.data.frame(h2o.metric(rfh2o_slt2_performance))
-rfh2o_slt2_pr %>%  ggplot(aes(recall,precision)) + geom_line() + theme_minimal()
+# plot(origRF_slt2_performance$pr) # not sure if this graph is necessary
+plot(origRF_slt2_performance$PR,  col = "blue", lwd = 2 )
+lines(x = h2o.recall(rfh2o_slt2_performance)[,"tpr"],
+      y = h2o.precision(rfh2o_slt2_performance)[,"precision"],
+      col = "red", type = "l", lwd = 2
+)
 
-plot(origRF_lu_performance$pr) 
-rfh2o_lu_performance <- as.data.frame(h2o.metric(rfh2o_lu_performance))
-rfh2o_lu_performance %>%  ggplot(aes(recall,precision)) + geom_line() + theme_minimal()
+plot(origRF_lu_performance$PR,  col = "blue", lwd = 2 )
+lines(x = h2o.recall(rfh2o_lu_performance)[,"tpr"],
+      y = h2o.precision(rfh2o_lu_performance)[,"precision"],
+      col = "red", type = "l", lwd = 2
+)
 
-# ..2.3 Sensitivy and Specificity Graph ----
+
+# ..2.3 Sensitivy vs Specificity Graph ----
+
 plot(origRF_slt2_performance$SS, col = "blue", lwd = 2)
-#rfh2o_slt2_specificity <- h2o.specificity(rfh2o_slt2_performance)[,"tnr"] 
-#rfh2o_slt2_sensitivity <- h2o.sensitivity(rfh2o_slt2_performance)[,"tpr"]
+#rfh2o_slt2_specificity <- h2o.specificity(rfh2o_slt2_performance)[,"tnr"] # 400 samples
+#rfh2o_slt2_sensitivity <- h2o.sensitivity(rfh2o_slt2_performance)[,"tpr"] # 400 samples
 lines(x = h2o.specificity(rfh2o_slt2_performance)[,"tnr"],
      y = h2o.sensitivity(rfh2o_slt2_performance)[,"tpr"],
      col = "red", type = "l", lwd = 2
      )
 
-plot(rfh2o_slt2_performance, # REMINDER: TPR = Sensitivity, FPR = (1 - specificity)
-     type = "roc", 
-     col = "red",
-     cex = 0.2,
-     pch = 10
-     )  
-
-plot(rfh2o_lu_performance, # REMINDER: TPR = Sensitivity, FPR = (1 - specificity)
-     type = "roc", 
-     col = "red",
-     cex = 0.2,
-     pch = 10
+plot(origRF_lu_performance$SS, col = "blue", lwd = 2)
+lines(x = h2o.specificity(rfh2o_lu_performance)[,"tnr"],
+      y = h2o.sensitivity(rfh2o_lu_performance)[,"tpr"],
+      col = "red", type = "l", lwd = 2
 )
-plot(origRF_slt2_performance$SS)
 
-# Do I need the Sensitivity vs Specificity graph if I already have the ROC Curve?
-origRF_slt2_performance$SS
-plot(origRF_slt2_performance$SS)
 
 # What's the difference here? Is it just that "pr" is prettier and gives the AUCPR as well? 
 origRF_slt2_performance$PR    
@@ -346,35 +355,47 @@ plot(origRF_slt2_performance$PR)
 origRF_slt2_performance$pr    
 plot(origRF_slt2_performance$pr)
 
-
-
-# ..2.X Other H2O Metrics ----
+# ..2.4 Other H2O Metrics ----
 h2o.confusionMatrix(rfh2o_slt2_performance)
 plot(h2o.F1(rfh2o_slt2_performance))
+plot(rfh2o_slt2_performance, # REMINDER: TPR = Sensitivity, FPR = (1 - specificity)
+     type = "roc", 
+     col = "red",
+     cex = 0.2,
+     pch = 10
+)
 
 h2o.confusionMatrix(rfh2o_lu_performance)
 h2o.F1(rfh2o_lu_performance)
+plot(rfh2o_lu_performance,
+     type = "roc", 
+     col = "red",
+     cex = 0.2,
+     pch = 10
+)
+
 
 # D) LOCAL METHODS ----
 
 # E) LIME ----
 # 1. Apply LIME to the new RF models ----
-lime_explainer_rfh2o <- lime( as.data.frame(trainData[,c(1:7)]), # original training data
-                             rfh2o,
-                             bin_continuous = TRUE,
-                             quantile_bins = FALSE
-                            )
-
-lime_explanations_rfh2o <- explain( as.data.frame(testData_slt2[1,]),   # Data to explain
-                              lime_explainer_rfh20,     # Explainer to use
-                              n_labels = 1, # only 1 type of category
-                              n_features = 7, # Number of features we want to use for explanation
-                              n_permutations = 250,
-                              feature_select = "none"
+lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), # original training data
+                              rfh2o,
+                              bin_continuous = TRUE,
+                              quantile_bins = FALSE
 )
-lime_explanations_rfh2o
-plot_features(lime_explanations)
 
+slt2data[500,c(1:7)] # This is a good example to show LIME's inconsistencies
+lime_explanations_rfh2o <- explain( as.data.frame(slt2data[500,c(1:7)] ),   # Data to explain
+                                    lime_explainer_rfh2o,     # Explainer to use
+                                    n_labels = 1, # only 1 type of category
+                                    n_features = 7, # Number of features we want to use for explanation
+                                    n_permutations = 100,
+                                    feature_select = "none"
+)
+
+lime_explanations_rfh2o
+plot_features(lime_explanations_rfh2o)
 
 # F) SHAP Values ----
 # 1. something ... ----
