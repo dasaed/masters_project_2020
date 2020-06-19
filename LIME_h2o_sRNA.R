@@ -39,6 +39,13 @@ library("h2o")          # ML model building
 
 # 3. Load and preprocess data ----
 
+# This is a brief explanation of the features used in the data
+# the free energy of the predicted secondary structure 
+# distance to their closest predicted promoter site
+# distance to their closest predicted Rho-independent terminator 
+# distances to their two closest open reading frames (ORFs)
+# whether or not the sRNA is transcribed on the same strand as their two closest ORFs
+
 # Training Data
 fullTrainingDataSet <- read.csv("./tests/combinedData.csv", header = TRUE)
 fullTrainingDataSet[,"Class"] <- as.logical(fullTrainingDataSet[,"Class"]) # guarantees that
@@ -47,6 +54,17 @@ fullTrainingDataSet[,"Class"] <- as.logical(fullTrainingDataSet[,"Class"]) # gua
 
 dataSetTrainX <- fullTrainingDataSet[,-(8:9)] # to be used by orig training RF model later on
 dataSetTrainY <- fullTrainingDataSet[,(8:9)] 
+
+# This graphs are just to show that none of the features follow a normal distribution
+hist(x = as.numeric(dataSetTrainX[,1]))
+hist(x = as.numeric(dataSetTrainX[,2]))
+hist(x = as.numeric(dataSetTrainX[,3]))
+hist(x = as.numeric(dataSetTrainX[,4]))
+hist(x = as.numeric(dataSetTrainX[,5]))
+hist(x = as.numeric(dataSetTrainX[,6]))
+hist(x = as.numeric(dataSetTrainX[,7]))
+
+
 
 # Testing Data
 slt2dataPos <- read.csv("./testing_datasets/SLT2_Positives.tsv", sep = "\t", header = TRUE)
@@ -198,11 +216,13 @@ head(slt2_predictions,2)
 
 slt2_OnlyA <- slt2_predictions[slt2_predictions$Similarities == "OnlyA",] 
 slt2_OnlyB <- slt2_predictions[slt2_predictions$Similarities == "OnlyB",]
+slt2_BothW <- slt2_predictions[slt2_predictions$Similarities == "BOTH_WRONG",]
 
 # By looking at the difference between the number of predictions the Orig. RF and the H2O RF,
 # we can conclude that the models are similar enough in accuracy
 nrow(slt2_OnlyA)
 nrow(slt2_OnlyB)
+nrow(slt2_BothW)
 
 # 4. LU Comparisons ----
 
@@ -236,12 +256,13 @@ head(lu_predictions,2)
 
 lu_OnlyA <- lu_predictions[lu_predictions$Similarities == "OnlyA",] 
 lu_OnlyB <- lu_predictions[lu_predictions$Similarities == "OnlyB",]
+lu_BothW <- lu_predictions[lu_predictions$Similarities == "BOTH_WRONG",]
 
 # By looking at the difference between the number of predictions the Orig. RF and the H2O RF,
 # we can conclude that the models are similar enough in accuracy
 nrow(lu_OnlyA)
 nrow(lu_OnlyB)
-
+nrow(lu_BothW)
 
 # D) COMPARE MODEL'S METRICS ----
 # In this section we'll get the model's metrics, and do a side by side comparison of
@@ -301,13 +322,14 @@ metrics_table["rfh2o_lu_perf","Accuracy"] <- nrow(lu_predictions[lu_predictions$
                                     )/nrow(lu_predictions)
 
 metrics_table
+
 ## Accuracy graph based on different thresholds("cutoff")
+
 plot(origRF_slt2_performance$acc, col = "blue") 
 lines(h2o.accuracy(rfh2o_slt2_performance), type = "l", col = "red")
 
 plot(origRF_lu_performance$acc, col = "blue")
 lines(h2o.accuracy(rfh2o_lu_performance), type = "l", col = "red")
-
 
 # ..2.2 AUCPR ----
 
@@ -318,7 +340,6 @@ metrics_table["rfh2o_lu_perf",  "AUCPR"] <- h2o.aucpr(rfh2o_lu_performance)
 
 metrics_table
 
-# plot(origRF_slt2_performance$pr) # not sure if this graph is necessary
 plot(origRF_slt2_performance$PR,  col = "blue", lwd = 2 )
 lines(x = h2o.recall(rfh2o_slt2_performance)[,"tpr"],
       y = h2o.precision(rfh2o_slt2_performance)[,"precision"],
@@ -366,7 +387,7 @@ plot(rfh2o_slt2_performance, # REMINDER: TPR = Sensitivity, FPR = (1 - specifici
 )
 
 h2o.confusionMatrix(rfh2o_lu_performance)
-h2o.F1(rfh2o_lu_performance)
+plot(h2o.F1(rfh2o_lu_performance))
 plot(rfh2o_lu_performance,
      type = "roc", 
      col = "red",
@@ -376,36 +397,68 @@ plot(rfh2o_lu_performance,
 
 
 # D) LOCAL METHODS ----
+# Obtain Data to Analyze ----
+
+head(slt2_OnlyA)
+head(lu_OnlyB)
+
+nrow(slt2_BothW)
+nrow(lu_BothW)
 
 # E) LIME ----
+
+# LIME ARGUMENTS
+# x	              The training data used for training the model that should be explained.
+# model	          The model whose output should be explained
+# preprocess	    Function to transform a character vector to the format expected from the model.
+# bin_continuous  Should continuous variables be binned when making the explanation
+# n_bins	        The number of bins for continuous variables if bin_continuous = TRUE
+# quantile_bins	  Should the bins be based on n_bins quantiles or spread evenly over the range of
+#                   the training data
+# use_density     If bin_continuous = FALSE should continuous data be sampled using a kernel density 
+#                 estimation. If not, continuous features are expected to follow a normal distribution.
+
 # 1. Apply LIME to the new RF models ----
 lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), # original training data
                               rfh2o,
-                              bin_continuous = TRUE,
-                              quantile_bins = FALSE
+                              bin_continuous = FALSE, # Having this as T generates inconsistent explanations 
+                              quantile_bins = FALSE,
+                              use_density = TRUE
 )
 
+
 slt2data[500,c(1:7)] # This is a good example to show LIME's inconsistencies
-lime_explanations_rfh2o <- explain( as.data.frame(slt2data[500,c(1:7)] ),   # Data to explain
+slt2_OnlyA[1,c(1:10)]
+lime_explanations_rfh2o <- explain( as.data.frame(slt2_OnlyA[1,c(1:7)] ),   # Data to explain
                                     lime_explainer_rfh2o,     # Explainer to use
                                     n_labels = 1, # only 1 type of category
                                     n_features = 7, # Number of features we want to use for explanation
-                                    n_permutations = 100,
-                                    feature_select = "none"
+                                    n_permutations = 10,
+                                    #feature_select = "none"
+                                   
+                                    dist_fun = "gower",
+                                    kernel_width = .75,
+                                    feature_select = "highest_weights"
 )
 
-lime_explanations_rfh2o
 plot_features(lime_explanations_rfh2o)
+head(lime_explanations_rfh2o)
+slt2_OnlyA[1,c(1:8)]
+?lime()
+lime_explainer_rfh2o$n_bins
+
 
 # F) SHAP Values ----
 # 1. something ... ----
 SHAP_H2O <- h2o.predict_contributions(rfh2o, as.h2o(slt2data[2,-c(6:8)]))
-SHAP_H2O
 
 # G) PDP ----
 # 1. Generate PDPs for the RF models ----
 
+h2o.partialPlot(rfh2o, data = as.h2o(slt2data_h2o), cols = "SS")
+h2o.partialPlot(rfh2o, data = as.h2o(ludata_h2o), cols = "SS")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "SS")
+
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "Pos10wrtsRNAStart")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "DistTerm")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "Distance")
@@ -413,3 +466,18 @@ h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "DownDistance")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameStrand")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameDownStrand")
 
+
+#### QUESTIONS ----
+# 1. LIME has a dist_fun.  "...dist_fun = 'gower' (default) it will use gower::gower_dist().
+#  Otherwise it will be forwarded to stats::dist()"- https://cran.r-project.org/web/packages/lime/lime.pdf
+#  I think the Gower distance may be problem(it only throws warnings), if one of the features
+#  has a value of 0. IDK how to use the stats::dist(), but is this something I should try to 
+#  look into? 
+# 2. As far as determining the instances, if I'm using the h2o model, is it ok if I focus on
+# the instances that were incorrectly predicted? 
+# Your thoughts here:
+#  * I'm trying to keep everything organized in a single script, so that it's easier to understand,
+#    and it easily flows from top to bottom.
+#  * H2O provides the data required to build many of the performance graphs, so I had to 
+#    manually build the graphs to compare against the values/graphs generated by the 
+#    evaluateData function. Just wondering if I plotted the values correctly
