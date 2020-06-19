@@ -18,14 +18,14 @@ library("PRROC")        # For evaluation purposes
 
 # IMPORT DATA ----
 
-# Training Data
+# Orig Training Data
 fullTrainingDataSet <- read.csv("./tests/combinedData.csv", header = TRUE)
 fullTrainingDataSet[,"Class"] <- as.logical(fullTrainingDataSet[,"Class"])
 
 dataSetTrainX <- fullTrainingDataSet[,-(8:9)]
 dataSetTrainY <- fullTrainingDataSet[,(8:9)]
 
-# Testing Data
+# Orig Testing Data
 slt2dataPos <- read.csv("./testing_datasets/SLT2_Positives.tsv", sep = "\t", header = TRUE)
 slt2dataNeg <- read.csv("./testing_datasets/SLT2_Negatives.tsv", sep = "\t", header = TRUE)
 slt2data <- rbind(slt2dataPos,slt2dataNeg)
@@ -33,6 +33,20 @@ slt2data <- rbind(slt2dataPos,slt2dataNeg)
 ludataPos <- read.csv("./testing_datasets/Lu_Positives.tsv", sep = "\t", header = TRUE)
 ludataNeg <- read.csv("./testing_datasets/Lu_Negatives.tsv", sep = "\t", header = TRUE)
 lu2data <- rbind(ludataPos,ludataNeg)
+
+# Scaled Training Data
+dataSetTrainX_scaled <-  scale(dataSetTrainX[,-c(5,7)], center = TRUE, scale = TRUE)
+dataSetTrainX_scaled  <- cbind(dataSetTrainX_scaled[,(1:4)], 
+                                 dataSetTrainX[,5],
+                                 dataSetTrainX_scaled[,5],
+                                 dataSetTrainX[,7])
+
+head(myDataSetTrainX)
+class(myDataSetTrainX)
+
+head(myDataSetTrainX_scaled)
+dim(myDataSetTrainX_scaled)
+colnames(myDataSetTrainX_scaled) <- colnames(myDataSetTrainX)
 
 
 # TRAIN MODEL ----

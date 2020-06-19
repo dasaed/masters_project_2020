@@ -21,7 +21,7 @@ library("ROCR")         # ML evaluation
 library("PRROC")        # ML evaluation
 library("randomForest") # ML model building
 #library("tidyverse")    # Graphing purposes
-library("ggplot2")      # Graphing purposes
+#library("ggplot2")      # Graphing purposes
 
 ## The following is copied from the h2o documentation site, as it's their recommended way for
 ## downloading and installing h2o for R (http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/index.html)
@@ -38,32 +38,65 @@ library("ggplot2")      # Graphing purposes
 library("h2o")          # ML model building
 
 # 3. Load and preprocess data ----
-
-# This is a brief explanation of the features used in the data
-# the free energy of the predicted secondary structure 
-# distance to their closest predicted promoter site
-# distance to their closest predicted Rho-independent terminator 
-# distances to their two closest open reading frames (ORFs)
-# whether or not the sRNA is transcribed on the same strand as their two closest ORFs
-
-# Training Data
+### Feature Explanations
+## "SS" = the free energy of the predicted secondary structure of the sRNA - mostly negative values
+## "Pos10wrtsRNAStart" = distance to their closest predicted promoter site
+## "DistTerm" = distance to their closest predicted Rho-independent terminator 
+## "Distance", = distance to the closest reading frame on the LEFT("upstream") side
+## "sameStrand" = boolean, if transcription is going in the same direction as the ORF(Left Open Reading Frame)
+#     ORF = genomic sequence that's supposed to code for a protein
+## "DownDistance"  = distance to the closest reading frame on the RIGHT("downstream") side
+## "sameDownStrand" =  boolean, if transcription is going in the same direction as the RORF(Right Open Reading Frame)
+# 
+# Load Training Data
 fullTrainingDataSet <- read.csv("./tests/combinedData.csv", header = TRUE)
 fullTrainingDataSet[,"Class"] <- as.logical(fullTrainingDataSet[,"Class"]) # guarantees that
                           # our h2o model trains the random forest (RF) as a classification 
                           # tree and not a regression tree
 
-dataSetTrainX <- fullTrainingDataSet[,-(8:9)] # to be used by orig training RF model later on
-dataSetTrainY <- fullTrainingDataSet[,(8:9)] 
+#dataSetTrainX <- fullTrainingDataSet[,-(8:9)] # UNCOMMENT THIS TO RETRAIN ORIG RF MODEL
+#dataSetTrainY <- fullTrainingDataSet[,(8:9)]  # UNCOMMENT THIS TO RETRAIN ORIG RF MODEL
 
-# This graphs are just to show that none of the features follow a normal distribution
+# Scale Training Data
+head(fullTrainingDataSet)
+dataSetTrain_scaled <- scale(fullTrainingDataSet[,-c(5,7,8,9)], center = TRUE, scale = TRUE)
+dataSetTrain_scaled <- cbind( dataSetTrain_scaled[,(1:4)], 
+                              fullTrainingDataSet[,5],
+                              dataSetTrain_scaled[,5],
+                              fullTrainingDataSet[,c(5,7,8,9)])
+head(dataSetTrainX_scaled)
+colnames(dataSetTrain_scaled) <- colnames(fullTrainingDataSet)
+
+
+# Normal distribution? Useful for the LIME settings later in section D
 hist(x = as.numeric(dataSetTrainX[,1]))
-hist(x = as.numeric(dataSetTrainX[,2]))
-hist(x = as.numeric(dataSetTrainX[,3]))
-hist(x = as.numeric(dataSetTrainX[,4]))
-hist(x = as.numeric(dataSetTrainX[,5]))
-hist(x = as.numeric(dataSetTrainX[,6]))
-hist(x = as.numeric(dataSetTrainX[,7]))
+qqnorm(as.numeric(dataSetTrainX[,1]))
+qqline(as.numeric(dataSetTrainX[,1]))
 
+hist(x = as.numeric(dataSetTrainX[,2]))
+qqnorm(as.numeric(dataSetTrainX[,2]))
+qqline(as.numeric(dataSetTrainX[,2]))
+
+
+hist(x = as.numeric(dataSetTrainX[,3]))
+qqnorm(as.numeric(dataSetTrainX[,3]))
+qqline(as.numeric(dataSetTrainX[,3]))
+
+hist(x = as.numeric(dataSetTrainX[,4]))
+qqnorm(as.numeric(dataSetTrainX[,4]))
+qqline(as.numeric(dataSetTrainX[,4]))
+
+hist(x = as.numeric(dataSetTrainX[,5]))
+qqnorm(as.numeric(dataSetTrainX[,5]))
+qqline(as.numeric(dataSetTrainX[,5]))
+
+hist(x = as.numeric(dataSetTrainX[,6]))
+qqnorm(as.numeric(dataSetTrainX[,6]))
+qqline(as.numeric(dataSetTrainX[,6]))
+
+hist(x = as.numeric(dataSetTrainX[,7]))
+qqnorm(as.numeric(dataSetTrainX[,7]))
+qqline(as.numeric(dataSetTrainX[,7]))
 
 
 # Testing Data
@@ -78,7 +111,6 @@ ludataPos$Class <- rep(1,nrow(ludataPos))
 ludataNeg <- read.csv("./testing_datasets/Lu_Negatives.tsv", sep = "\t", header = TRUE)
 ludataNeg$Class <- rep(0,nrow(ludataNeg))
 ludata <- rbind(ludataPos,ludataNeg)
-
 
 
 # 4. Load original model ----
@@ -102,13 +134,13 @@ origRF <- readRDS("RF_classifier4sRNA.rds")
 # functions need to be defined for each model type. 
 
 predict_model.randomForest <- function(x, newdata, type, ...) {
-  res <- predict(x, newdata = newdata, ...)
+  res <- predict(x, newdata = newdata, type = "prob")
   switch(
     type,
     raw = data.frame(Response = ifelse(res[,2] > 0.5, "sRNA", "notSRNA"), 
                      stringsAsFactors = FALSE
     ),
-    prob = res 
+    prob = as.data.frame(res, check.names = F)
   )
   print(class(res))
   print(dim(res))
@@ -194,7 +226,8 @@ slt2_predictions <-  cbind(as.data.frame(slt2data),               # Input
 colnames(slt2_predictions) <- c("SS", "Pos10wrtsRNAStart", "DistTerm", "Distance", 
                                 "sameStrand", "DownDistance", "sameDownStrand", "Class",
                                 "OrigRF_T","RF_H2O_T")
-
+slt2_predictions
+cor(slt2_predictions[,"OrigRF_T"],slt2_predictions[,"RF_H2O_T"]) # the closest to 1, the more correlated(similar) they are
 slt2_predictions$origPreds <- ifelse( slt2_predictions$OrigRF_T >= 0.5, 1, 0) 
 slt2_predictions$h2oPreds  <- ifelse( slt2_predictions$RF_H2O_T >= 0.5, 1, 0) 
 slt2_predictions$Similarities <- NA
@@ -263,6 +296,8 @@ lu_BothW <- lu_predictions[lu_predictions$Similarities == "BOTH_WRONG",]
 nrow(lu_OnlyA)
 nrow(lu_OnlyB)
 nrow(lu_BothW)
+cor(lu_predictions[,"OrigRF_T"],lu_predictions[,"RF_H2O_T"]) # the closest to 1, the more correlated(similar) they are
+
 
 # D) COMPARE MODEL'S METRICS ----
 # In this section we'll get the model's metrics, and do a side by side comparison of
@@ -400,7 +435,7 @@ plot(rfh2o_lu_performance,
 # Obtain Data to Analyze ----
 
 head(slt2_OnlyA)
-head(lu_OnlyB)
+head(lu_OnlyA)
 
 nrow(slt2_BothW)
 nrow(lu_BothW)
@@ -419,43 +454,54 @@ nrow(lu_BothW)
 #                 estimation. If not, continuous features are expected to follow a normal distribution.
 
 # 1. Apply LIME to the new RF models ----
+
 lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), # original training data
                               rfh2o,
-                              bin_continuous = FALSE, # Having this as T generates inconsistent explanations 
+                              bin_continuous = FALSE, # Having this as T generates inconsistent explanations
+                                                      # b/c of the mixture of numerical and categorical (T/F) 
+                                                      # features
                               quantile_bins = FALSE,
-                              use_density = TRUE
+                              use_density = TRUE,
+                              n_bins = 10
 )
-
-
-slt2data[500,c(1:7)] # This is a good example to show LIME's inconsistencies
-slt2_OnlyA[1,c(1:10)]
-lime_explanations_rfh2o <- explain( as.data.frame(slt2_OnlyA[1,c(1:7)] ),   # Data to explain
+nrow(slt2_OnlyA)
+lime_explanations_rfh2o <- explain( as.data.frame(slt2_OnlyA[14,c(1:7)] ),   # Data to explain
                                     lime_explainer_rfh2o,     # Explainer to use
                                     n_labels = 1, # only 1 type of category
                                     n_features = 7, # Number of features we want to use for explanation
-                                    n_permutations = 10,
-                                    #feature_select = "none"
-                                   
-                                    dist_fun = "gower",
-                                    kernel_width = .75,
-                                    feature_select = "highest_weights"
+                                    n_permutations = 200,
+                                    dist_fun = "gower"  # b/c training contains numerical and categorical(T/F) features
+#                                    kernel_width = .75,
+#                                    feature_select = "highest_weights"
 )
 
 plot_features(lime_explanations_rfh2o)
 head(lime_explanations_rfh2o)
 slt2_OnlyA[1,c(1:8)]
-?lime()
 lime_explainer_rfh2o$n_bins
 
 
 # F) SHAP Values ----
 # 1. something ... ----
-SHAP_H2O <- h2o.predict_contributions(rfh2o, as.h2o(slt2data[2,-c(6:8)]))
+SHAP_H2O1 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
+SHAP_H2O2 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
+SHAP_H2O3 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
+SHAP_H2O4 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
+SHAP_H2O5 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
+
+class(SHAP_H2O1)
+
+
+
+slt2data[2,]
+
 
 # G) PDP ----
 # 1. Generate PDPs for the RF models ----
 
-h2o.partialPlot(rfh2o, data = as.h2o(slt2data_h2o), cols = "SS")
+?partialPlot()
+h2o.partialPlot(rfh2o, data = as.h2o(slt2data_h2o), cols = "SS", plot=TRUE, nbins=10)
+
 h2o.partialPlot(rfh2o, data = as.h2o(ludata_h2o), cols = "SS")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "SS")
 
@@ -466,18 +512,8 @@ h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "DownDistance")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameStrand")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameDownStrand")
 
+#TODO - Create model with scaled data and try LIME
+#TODO - PDPs for classification tasks, instead of regression
+#TODO - See how LIME and SHAP agree and compare
 
 #### QUESTIONS ----
-# 1. LIME has a dist_fun.  "...dist_fun = 'gower' (default) it will use gower::gower_dist().
-#  Otherwise it will be forwarded to stats::dist()"- https://cran.r-project.org/web/packages/lime/lime.pdf
-#  I think the Gower distance may be problem(it only throws warnings), if one of the features
-#  has a value of 0. IDK how to use the stats::dist(), but is this something I should try to 
-#  look into? 
-# 2. As far as determining the instances, if I'm using the h2o model, is it ok if I focus on
-# the instances that were incorrectly predicted? 
-# Your thoughts here:
-#  * I'm trying to keep everything organized in a single script, so that it's easier to understand,
-#    and it easily flows from top to bottom.
-#  * H2O provides the data required to build many of the performance graphs, so I had to 
-#    manually build the graphs to compare against the values/graphs generated by the 
-#    evaluateData function. Just wondering if I plotted the values correctly

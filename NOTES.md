@@ -146,3 +146,7 @@ SHOULD I WORRY?
 ✖ dplyr::filter()   masks stats::filter()
 ✖ dplyr::lag()      masks stats::lag()
 ✖ ggplot2::margin() masks randomForest::margin()
+
+
+
+slt2data[500,c(1:7)] # This is a good example to show LIME's inconsistencies
