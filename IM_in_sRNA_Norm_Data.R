@@ -49,7 +49,7 @@ library("h2o")          # ML model building
 # ..3.1 Load Training Data ----
 trainDataSet <- read.csv("./tests/combinedData.csv", header = TRUE)
 trainDataSet[,"Class"] <- as.logical(trainDataSet[,"Class"]) # guarantees that
-                          # our h2o model trains the random forest (RF) as a classification
+                          # our h2o model trains the random forest (RF) as a classification 
                           # tree and not a regression tree
 
 # ..3.2 Scale and Center the Training Data ----
@@ -65,7 +65,7 @@ dataSetTrain_scaled <- cbind( dataSetTrain_scaled[,(1:4)],
 colnames(dataSetTrain_scaled) <- c("SS", "Pos10wrtsRNAStart", "DistTerm", "Distance", 
                                    "sameStrand", "DownDistance", "sameDownStrand", "ID", "Class")
 dataSetTrain_scaled[,"Class"] <- as.logical(dataSetTrain_scaled[,"Class"]) # Just making sure Class is taken a logical value
-head(dataSetTrain_scaled,5)
+head(dataSetTrain_scaled)
 # ..3.3 Normalize the Training Data ----
 # Max and mins for regular normalization
 normalize <- function(x) {
@@ -228,25 +228,30 @@ ludata_norm$DownDistance      <- normalize_td(ludata_norm$DownDistance,
 # The original .rds file can be found in github under the following link:
 # https://github.com/BioinformaticsLabAtMUN/sRNARanking
 
+
 ## ..4.1 Load/Retrain Orig Model ----
 # Load original model (save time)
 origRF <- readRDS("RF_classifier4sRNA.rds")
 
+## UNCOMMENT THIS SECTION TO RETRAIN ORIG RF MODEL
 #tuneRF(combData2[,-8], y = factor(combData2[,8]), ntreeTry = 400, mtryStart = 2)
 #set.seed(1234)
-#origRF_retrained <- randomForest(x = dataSetTrainX, y = factor(dataSetTrainY[,9]), mtry = 2, ntree = 400, importance = TRUE)
-
+#origRF <- randomForest(x = dataSetTrainX, y = factor(dataSetTrainY[,9]), mtry = 2, ntree = 400, importance = TRUE)
 
 ## ..4.2 Create functions for compatibility  ----
 
-# The original model was built using the randomForest library found in CRAN. However, even though LIME is supposed to be model agnostic, it's current R implementation only supports certain models out of the box. To extend support of the LIME library to other models, the following functions need to be defined for each model type. 
+# The original model was built using the randomForest library found in CRAN. However, even though
+# LIME is supposed to be model agnostic, it's current R implementation only supports certain
+# models out of the box. To extend support of the LIME library to other models, the following
+# functions need to be defined for each model type. 
 
 predict_model.randomForest <- function(x, newdata, type, ...) {
   res <- predict(x, newdata = newdata, type = "prob")
   switch(
     type,
-    raw = data.frame(Response = ifelse(as.vector(res[,2]) > 0.5, "1", "0"), stringsAsFactors = FALSE),
-    #raw = data.frame(Response = ifelse(res[,2] > 0.5, "sRNA", "notSRNA"), stringsAsFactors = FALSE),
+    raw = data.frame(Response = ifelse(res[,2] > 0.5, "sRNA", "notSRNA"), 
+                     stringsAsFactors = FALSE
+    ),
     prob = as.data.frame(res, check.names = F)
   )
   print(class(res))
@@ -268,36 +273,36 @@ h2o.no_progress()
 trainData <- as.h2o(trainDataSet) 
 trainData_scaled <- as.h2o(dataSetTrain_scaled) 
 trainData_norm <- as.h2o(dataSetTrain_norm) 
-
 # 2. Build model ----
-# Since we are going to use the h2o library to perform our machine learning interpretability, we need to train our model, or an equivalent one, using h2o tools
-
-# ..2.1 Build model with Orig Training data ----
 
 rfh2o <- h2o.randomForest( 
              training_frame = trainData, # training using the normal data
-             x = 1:7,                    # features to use to generate the prediction
-             y = 9,                      # Class type -> what we want to predict
-             model_id = "rf1_sRNA",      # name of model in h2o
-             ntrees = 400,               # max number of trees  
-             seed = 1234,                # seed, has to be set WITHIN the h2o function and it's supposed to be different from "R's seed", so results might not be exactly the same as orig model, but should be similar enough
+             x = 1:7,                   # features to use to generate the prediction
+             y = 9,                     # Class type -> what we want to predict
+             model_id = "rf1_sRNA",     # name of model in h2o
+             ntrees = 400,              # max number of trees  
+             seed = 1234,               # seed, has to be set WITHIN the h2o function
+                                        # and it's supposed to be different from "R's seed", so 
+                                        # results might not be exactly the same as orig model, but
+                                        # should be similar enough
              mtries = 2,                 # Same as original model 
              max_depth = 30
 )
 
-# ..2.2 Build model with Scaled Training data ----
 rfh2o_scaled <- h2o.randomForest( 
   training_frame = trainData_scaled, # training using the standarized data
   x = 1:7,                   # features to use to generate the prediction
   y = 9,                     # Class type -> what we want to predict
   model_id = "rf2_sRNA",     # name of model in h2o
   ntrees = 400,              # max number of trees  
-  seed = 1234,               # seed, has to be set WITHIN the h2o function and it's supposed to be different from "R's seed", so results might not be exactly the same as orig model, but should be similar enough
+  seed = 1234,               # seed, has to be set WITHIN the h2o function
+  # and it's supposed to be different from "R's seed", so 
+  # results might not be exactly the same as orig model, but
+  # should be similar enough
   mtries = 2,                 # Same as original model 
   max_depth = 30
 )
 
-# ..2.3 Build model with Norm Training data ----
 rfh2o_norm <- h2o.randomForest( 
   training_frame = trainData_norm, # Training using the normalized data
   x = 1:7,                   # features to use to generate the prediction
@@ -311,24 +316,7 @@ rfh2o_norm <- h2o.randomForest(
   mtries = 2,                 # Same as original model 
   max_depth = 30
 )
-# ..2.4 BONUS: Build GLM model ----
-# As we were doing tests with LIME, we discovered that it yielded irregular responses, and as a result, the explanations could not be trusted. It seems to be a known issue that LIME is not perfect for every model, and that it struggles with data that is highly diverse. In this use case, our data contains mixed numerical and categorical features, significantly different scales and magnitudes in our numercial features, and an inbalanced data sets that favors predictions of sRNAs being false. Since lime creates a local interpretable linear model for its explanations, the GLM constructed here was simply to verify a hypothesis that a linear model would be unable to explain the data. The "unbalanced-ness" seems to create models where the features tend always support a result of "false", while claiming that all the features are against a result of true. 
 
-glmh2o <- h2o.glm( # https://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/glm.html 
-  training_frame = trainData, # training using the normal data
-  x = 1:7,                   # features to use to generate the prediction
-  y = 9,                     # Class type -> what we want to predict
-  model_id = "glm_sRNA",     # name of model in h2o
-  seed = 1234,
-  family = "binomial"
-)
-
-glmh2o_perf <- h2o.performance(glmh2o)
-glmh2o_perf
-h2o.coef(glmh2o)
-h2o.coef_norm(glmh2o)
-glmh2o@model$coefficients_table
-h2o.r2(glmh2o) # R^2 value is really low, and having a Max Recall being really low, meaning that LIME is also predicting that everything should be false
 
 # 3. Preview H2O's RF ----
 # This is the performance with the OOB error, based on the training process (ie training data)
@@ -339,7 +327,9 @@ rfh2o_training_peformance <- h2o.performance(rfh2o)
 rfh2o_training_peformance
 
 # C) COMPARE MODEL'S PREDICTIONS ----
-# In this section we'll get the predictions both models generate on the testing data LU and SLT2. The goal of this section is not to prove which model is the best, but to prove that the models are similar enough to the point that the analysis of the H2O model will be a valid analogy model for the original RF model. 
+# In this section we'll get the predictions both models generate on the testing data LU and SLT2. The goal
+# of this section is not to prove which model is the best, but to prove that the models are similar enough
+# to the point that the analysis of the H2O model will be a valid analogy model for the original RF model. 
 
 # 1. Get Testing Data Predictions from the Models ----
 
@@ -355,8 +345,6 @@ rfh2o_scaled_lu_pred <- h2o.predict(object = rfh2o_scaled, newdata = as.h2o(luda
 rfh2o_norm_slt2_pred <- h2o.predict(object = rfh2o_norm, newdata = as.h2o(slt2data_norm[,-8]) )
 rfh2o_norm_lu_pred <- h2o.predict(object = rfh2o_norm, newdata = as.h2o(ludata_norm[,-8]) )
 
-glm_slt2_pred <- h2o.predict(object = glmh2o, newdata = as.h2o(slt2data[,-8]) )
-glm_lu_pred <- h2o.predict(object = glmh2o, newdata = as.h2o(ludata[,-8]) )
 
 # 2. Create a comparison function ----
 # This function is to simplify the comparison between the predictions from the Original RF model and the H2O RF model
@@ -379,18 +367,15 @@ compareAnswers <- function(a,b,c){
 }
 
 # 3. SLT2 comparisons ----
-# ..3.1 Build comparison table ----
 slt2_predictions <-  cbind(as.data.frame(slt2data),               # Input
                            as.data.frame(origRF_slt2_pred[,2]),   # Orig RF predictions 
                            as.data.frame(rfh2o_slt2_pred[,3]),        # H2O RF predictions
                            as.data.frame(rfh2o_scaled_slt2_pred[,3]), # Scaled RF predictions
                            as.data.frame(rfh2o_norm_slt2_pred[,3])    # Normalized RF predictions
                            )
-head(slt2_predictions, 3)
 colnames(slt2_predictions) <- c("SS", "Pos10wrtsRNAStart", "DistTerm", "Distance", 
                                 "sameStrand", "DownDistance", "sameDownStrand", "Class",
                                 "OrigRF_T","RF_H2O_T","RFH2O_scaledT","RFH2O_normT")
-head(slt2_predictions, 3)
 
 # Check correlations between the OrigRF and the H2O models
 # the closest to 1, the more correlated(similar) they are
@@ -432,11 +417,8 @@ for( i in 1:nrow(slt2_predictions) ){
   )
 } 
 
-head(slt2_predictions)
+head(slt2_predictions,2)
 summary(slt2_predictions)
-str(slt2_predictions)
-
-# ..3.2 Compare OrigRF vs H2O Model ----
 
 # By looking at the difference between the number of predictions the Orig. RF and the H2O RF,
 # we can conclude that the models are similar enough in accuracy
@@ -452,8 +434,6 @@ nrow(slt2_BothR)
 nrow(slt2_OnlyA) + nrow(slt2_OnlyB) + nrow(slt2_BothW) + nrow(slt2_BothR)
 nrow(slt2_predictions)
 
-# ..3.3 Compare OrigRF vs H2O Model Scaled ----
-
 # By looking at the difference between the number of predictions the Orig. RF and the H2O Scaled RF,
 # we can conclude that the models are similar enough in accuracy
 slt2_OnlyA_scaled <- slt2_predictions[slt2_predictions$origVsH2OScaled == "OnlyA",] 
@@ -468,7 +448,6 @@ nrow(slt2_BothR_scaled)
 nrow(slt2_OnlyA_scaled) + nrow(slt2_OnlyB_scaled) + nrow(slt2_BothW_scaled) + nrow(slt2_BothR_scaled)
 nrow(slt2_predictions)
 
-# ..3.4 Compare OrigRF vs H2O Model Normalized ----
 
 # By looking at the difference between the number of predictions the Orig. RF and the H2O RF,
 # we can conclude that the models are similar enough in accuracy
@@ -485,8 +464,8 @@ nrow(slt2_OnlyA_norm) + nrow(slt2_OnlyB_norm) + nrow(slt2_BothW_norm) + nrow(slt
 nrow(slt2_predictions)
 
 # 4. LU Comparisons ----
-# ..4.1 Build comparison table ----
-lu_predictions <-  cbind(  as.data.frame(ludata),               # Input
+
+lu_predictions <-  cbind(as.data.frame(ludata),               # Input
                            as.data.frame(origRF_lu_pred[,2]),   # Orig RF predictions 
                            as.data.frame(rfh2o_lu_pred[,3]),        # H2O RF predictions
                            as.data.frame(rfh2o_scaled_lu_pred[,3]), # Scaled RF predictions
@@ -511,6 +490,8 @@ lu_predictions$origVsH2O <- NA
 lu_predictions$origVsH2OScaled <- NA
 lu_predictions$origVsH2ONorm <- NA
 
+
+
 for( i in 1:nrow(lu_predictions) ){
   # Based on the way we are feeding the values to the compareAnswers function, 
   # Similiarities = OnlyA means that only the Orig RF got the right answer
@@ -534,11 +515,9 @@ for( i in 1:nrow(lu_predictions) ){
   )
 } 
 
-head(lu_predictions)
+head(lu_predictions,2)
 summary(lu_predictions)
-str(lu_predictions)
 
-# ..4.2 Compare OrigRF vs H2O Model ----
 # By looking at the difference between the number of predictions the Orig. RF and the H2O RF,
 # we can conclude that the models are similar enough in accuracy
 lu_OnlyA <- lu_predictions[lu_predictions$origVsH2O == "OnlyA",] 
@@ -553,8 +532,8 @@ nrow(lu_BothR)
 nrow(lu_OnlyA) + nrow(lu_OnlyB) + nrow(lu_BothW) + nrow(lu_BothR)
 nrow(lu_predictions)
 
-# ..4.3 Compare OrigRF vs H2O Model Scaled ----
-
+# By looking at the difference between the number of predictions the Orig. RF and the H2O Scaled RF,
+# we can conclude that the models are similar enough in accuracy
 lu_OnlyA_scaled <- lu_predictions[lu_predictions$origVsH2OScaled == "OnlyA",] 
 lu_OnlyB_scaled <- lu_predictions[lu_predictions$origVsH2OScaled == "OnlyB",]
 lu_BothW_scaled <- lu_predictions[lu_predictions$origVsH2OScaled == "BOTH_WRONG",]
@@ -568,8 +547,8 @@ nrow(lu_OnlyA_scaled) + nrow(lu_OnlyB_scaled) + nrow(lu_BothW_scaled) + nrow(lu_
 nrow(lu_predictions)
 
 
-# ..4.3 Compare OrigRF vs H2O Model Normalized ----
-
+# By looking at the difference between the number of predictions the Orig. RF and the H2O RF,
+# we can conclude that the models are similar enough in accuracy
 lu_OnlyA_norm <- lu_predictions[lu_predictions$origVsH2ONorm == "OnlyA",] 
 lu_OnlyB_norm <- lu_predictions[lu_predictions$origVsH2ONorm == "OnlyB",]
 lu_BothW_norm <- lu_predictions[lu_predictions$origVsH2ONorm == "BOTH_WRONG",]
@@ -622,56 +601,23 @@ ludata_h2o <- ludata
 ludata_h2o[,"Class"] <- as.logical(ludata_h2o[,"Class"]) 
 rfh2o_lu_performance <- h2o.performance(rfh2o, newdata = as.h2o(ludata_h2o))
 
-slt2data_h2o_scaled <- slt2data_scaled
-slt2data_h2o_scaled[,"Class"] <- as.logical(slt2data_h2o_scaled[,"Class"]) 
-rfh2o_slt2_performance_scaled <- h2o.performance(rfh2o, newdata = as.h2o(slt2data_h2o_scaled))
-
-ludata_h2o_scaled <- ludata_scaled
-ludata_h2o_scaled[,"Class"] <- as.logical(ludata_h2o_scaled[,"Class"]) 
-rfh2o_lu_performance_scaled <- h2o.performance(rfh2o, newdata = as.h2o(ludata_h2o_scaled))
-
-slt2data_h2o_norm <- slt2data_norm
-slt2data_h2o_norm[,"Class"] <- as.logical(slt2data_h2o_norm[,"Class"]) 
-rfh2o_slt2_performance_norm <- h2o.performance(rfh2o, newdata = as.h2o(slt2data_h2o_norm))
-
-ludata_h2o_norm <- ludata_norm
-ludata_h2o_norm[,"Class"] <- as.logical(ludata_h2o_norm[,"Class"]) 
-rfh2o_lu_performance_norm <- h2o.performance(rfh2o, newdata = as.h2o(ludata_h2o_norm))
-
-
-
 # 2. Compare Metrics  ----
 # ..2.1 Accuracy ----
 
-metrics_table <- data.frame("Accuracy" = 1:8)
-rownames(metrics_table) <- c("origRF_slt2_perf", "rfh2o_slt2_perf", "rfh2o_slt2_perf_scaled", "rfh2o_slt2_perf_norm",
-                             "origRF_lu_perf", "rfh2o_lu_perf",  "rfh2o_lu_perf_scaled",  "rfh2o_lu_perf_norm")
-metrics_table["origRF_slt2_perf","Accuracy"] <- nrow(slt2_predictions[slt2_predictions$origVsH2O == "BOTH_RIGHT" | 
-                                                     slt2_predictions$origVsH2O == "OnlyA",]
+metrics_table <- data.frame("Accuracy" = 1:4)
+rownames(metrics_table) <- c("origRF_slt2_perf", "rfh2o_slt2_perf","origRF_lu_perf", "rfh2o_lu_perf")
+metrics_table["origRF_slt2_perf","Accuracy"] <- nrow(slt2_predictions[slt2_predictions$Similarities == "BOTH_RIGHT" | 
+                                                     slt2_predictions$Similarities == "OnlyA",]
                                     )/nrow(slt2_predictions)
-metrics_table["rfh2o_slt2_perf","Accuracy"] <- nrow(slt2_predictions[slt2_predictions$origVsH2O == "BOTH_RIGHT" | 
-                                                       slt2_predictions$origVsH2O == "OnlyB",]
+metrics_table["rfh2o_slt2_perf","Accuracy"] <- nrow(slt2_predictions[slt2_predictions$Similarities == "BOTH_RIGHT" | 
+                                                       slt2_predictions$Similarities == "OnlyB",]
                                     )/nrow(slt2_predictions)
-metrics_table["rfh2o_slt2_perf_scaled","Accuracy"] <- nrow(slt2_predictions[slt2_predictions$origVsH2OScaled == "BOTH_RIGHT" | 
-                                                       slt2_predictions$origVsH2OScaled == "OnlyB",])/nrow(slt2_predictions)
-
-metrics_table["rfh2o_slt2_perf_norm","Accuracy"] <- nrow(slt2_predictions[slt2_predictions$origVsH2ONorm == "BOTH_RIGHT" | 
-                                                        slt2_predictions$origVsH2ONorm == "OnlyB",])/nrow(slt2_predictions)
-
-metrics_table["origRF_lu_perf","Accuracy"] <- nrow(lu_predictions[lu_predictions$origVsH2O == "BOTH_RIGHT" | 
-                                                     lu_predictions$origVsH2O == "OnlyA",]
+metrics_table["origRF_lu_perf","Accuracy"] <- nrow(lu_predictions[lu_predictions$Similarities == "BOTH_RIGHT" | 
+                                                     lu_predictions$Similarities == "OnlyA",]
                                     )/nrow(lu_predictions)
-metrics_table["rfh2o_lu_perf","Accuracy"] <- nrow(lu_predictions[lu_predictions$origVsH2O == "BOTH_RIGHT" | 
-                                                     lu_predictions$origVsH2O == "OnlyB",]
+metrics_table["rfh2o_lu_perf","Accuracy"] <- nrow(lu_predictions[lu_predictions$Similarities == "BOTH_RIGHT" | 
+                                                     lu_predictions$Similarities == "OnlyB",]
                                     )/nrow(lu_predictions)
-metrics_table["rfh2o_lu_perf_scaled","Accuracy"] <- nrow(lu_predictions[lu_predictions$origVsH2OScaled == "BOTH_RIGHT" | 
-                                                     lu_predictions$origVsH2OScaled == "OnlyB",]
-                                    )/nrow(lu_predictions)
-
-metrics_table["rfh2o_lu_perf_norm","Accuracy"] <- nrow(lu_predictions[lu_predictions$origVsH2ONorm == "BOTH_RIGHT" | 
-                                                     lu_predictions$origVsH2ONorm == "OnlyB",]
-                                    )/nrow(lu_predictions)
-
 
 metrics_table
 
@@ -679,26 +625,16 @@ metrics_table
 
 plot(origRF_slt2_performance$acc, col = "blue") 
 lines(h2o.accuracy(rfh2o_slt2_performance), type = "l", col = "red")
-lines(h2o.accuracy(rfh2o_slt2_performance_scaled), type = "l", col = "green")
-lines(h2o.accuracy(rfh2o_slt2_performance_norm), type = "l", col = "magenta")
-
 
 plot(origRF_lu_performance$acc, col = "blue")
 lines(h2o.accuracy(rfh2o_lu_performance), type = "l", col = "red")
-lines(h2o.accuracy(rfh2o_lu_performance_scaled), type = "l", col = "green")
-lines(h2o.accuracy(rfh2o_lu_performance_norm), type = "l", col = "magenta")
 
 # ..2.2 AUCPR ----
 
 metrics_table["origRF_slt2_perf","AUCPR"] <- origRF_slt2_performance$pr$auc.integral
 metrics_table["rfh2o_slt2_perf", "AUCPR"] <- h2o.aucpr(rfh2o_slt2_performance)
-metrics_table["rfh2o_slt2_perf_scaled", "AUCPR"] <- h2o.aucpr(rfh2o_slt2_performance_scaled)
-metrics_table["rfh2o_slt2_perf_norm", "AUCPR"] <- h2o.aucpr(rfh2o_slt2_performance_norm)
-
 metrics_table["origRF_lu_perf",  "AUCPR"] <- origRF_lu_performance$pr$auc.integral
 metrics_table["rfh2o_lu_perf",  "AUCPR"] <- h2o.aucpr(rfh2o_lu_performance)
-metrics_table["rfh2o_lu_perf_scaled", "AUCPR"] <- h2o.aucpr(rfh2o_lu_performance_scaled)
-metrics_table["rfh2o_lu_perf_norm", "AUCPR"] <- h2o.aucpr(rfh2o_lu_performance_norm)
 
 metrics_table
 
@@ -707,28 +643,11 @@ lines(x = h2o.recall(rfh2o_slt2_performance)[,"tpr"],
       y = h2o.precision(rfh2o_slt2_performance)[,"precision"],
       col = "red", type = "l", lwd = 2
 )
-lines(x = h2o.recall(rfh2o_slt2_performance_norm)[,"tpr"],
-      y = h2o.precision(rfh2o_slt2_performance_norm)[,"precision"],
-      col = "magenta", type = "l", lwd = 2
-)
-lines(x = h2o.recall(rfh2o_slt2_performance_scaled)[,"tpr"],
-      y = h2o.precision(rfh2o_slt2_performance_scaled)[,"precision"],
-      col = "green", type = "l", lwd = 2
-)
-
 
 plot(origRF_lu_performance$PR,  col = "blue", lwd = 2 )
 lines(x = h2o.recall(rfh2o_lu_performance)[,"tpr"],
       y = h2o.precision(rfh2o_lu_performance)[,"precision"],
       col = "red", type = "l", lwd = 2
-)
-lines(x = h2o.recall(rfh2o_lu_performance_scaled)[,"tpr"],
-      y = h2o.precision(rfh2o_lu_performance_scaled)[,"precision"],
-      col = "green", type = "l", lwd = 2
-)
-lines(x = h2o.recall(rfh2o_lu_performance_norm)[,"tpr"],
-      y = h2o.precision(rfh2o_lu_performance_norm)[,"precision"],
-      col = "magenta", type = "l", lwd = 2
 )
 
 
@@ -742,33 +661,18 @@ lines(x = h2o.specificity(rfh2o_slt2_performance)[,"tnr"],
      col = "red", type = "l", lwd = 2
      )
 
-lines(x = h2o.specificity(rfh2o_slt2_performance_scaled)[,"tnr"],
-      y = h2o.sensitivity(rfh2o_slt2_performance_scaled)[,"tpr"],
-      col = "green", type = "l", lwd = 2
-)
-lines(x = h2o.specificity(rfh2o_slt2_performance_norm)[,"tnr"],
-      y = h2o.sensitivity(rfh2o_slt2_performance_norm)[,"tpr"],
-      col = "magenta", type = "l", lwd = 2
-)
-
-
-
 plot(origRF_lu_performance$SS, col = "blue", lwd = 2)
 lines(x = h2o.specificity(rfh2o_lu_performance)[,"tnr"],
       y = h2o.sensitivity(rfh2o_lu_performance)[,"tpr"],
       col = "red", type = "l", lwd = 2
 )
 
-lines(x = h2o.specificity(rfh2o_lu_performance_scaled)[,"tnr"],
-      y = h2o.sensitivity(rfh2o_lu_performance_scaled)[,"tpr"],
-      col = "green", type = "l", lwd = 2
-)
 
-lines(x = h2o.specificity(rfh2o_lu_performance_norm)[,"tnr"],
-      y = h2o.sensitivity(rfh2o_lu_performance_norm)[,"tpr"],
-      col = "magenta", type = "l", lwd = 2
-)
-
+# What's the difference here? Is it just that "pr" is prettier and gives the AUCPR as well? 
+origRF_slt2_performance$PR    
+plot(origRF_slt2_performance$PR)
+origRF_slt2_performance$pr    
+plot(origRF_slt2_performance$pr)
 
 # ..2.4 Other H2O Metrics ----
 h2o.confusionMatrix(rfh2o_slt2_performance)
@@ -789,19 +693,19 @@ plot(rfh2o_lu_performance,
      pch = 10
 )
 
-# Conclusion from the model interpretations: The normalization, scaled, and the GLM created here were solely for the purpose of applying LIME to our orig RF.
 
 # D) LOCAL METHODS ----
-# Data to Analyze ----
+# Obtain Data to Analyze ----
 
 head(slt2_OnlyA)
-head(slt2_OnlyA_scaled)
-head(slt2_OnlyA_norm)
+head(lu_OnlyA)
 
+nrow(slt2_BothW)
+nrow(lu_BothW)
 
 # E) LIME ----
-# 
-# LIME FUNCTION ARGUMENTS
+
+# LIME ARGUMENTS
 # x	              The training data used for training the model that should be explained.
 # model	          The model whose output should be explained
 # preprocess	    Function to transform a character vector to the format expected from the model.
@@ -811,152 +715,33 @@ head(slt2_OnlyA_norm)
 #                   the training data
 # use_density     If bin_continuous = FALSE should continuous data be sampled using a kernel density 
 #                 estimation. If not, continuous features are expected to follow a normal distribution.
-#
-#
-# A known problem with LIME is that explanations may be inconsistant from one instance to the
-# next, even when the instances are very similar to each. With this in mind, each instance
-# we tested was tested at least 5 times (ie we manually ran this section over and over at
-# least 5 times), and with a high enough number of permutations,
-# we managed to get somewhat consistent results. However, some of the results obtained from
-# LIME were heavily flawed as it would yield explanations that contradicted the result. 
-# Additionally, a GLM was also trained to attempt to measure the variance of the data, but the
-# results from the GLM yielded an R^2 value between 0.2 and 0.3, with a max recall of 0.07. In
-# other words, the GLM model was only predicting false instances, and since LIME uses linear 
-# models for its explanations, based on our observations, it is safe to conclude that LIME
-# was doing the same. Whenever a TRUE instance was analyze, LIME's explanations would say 
-# that most factors contradict the prediction, which is obviously counter intuitive and useless.
-#
-# During the making of this project, several problems were encountered while trying
-# to apply LIME to the sRNA RF model. LIME attempts to explain a complex model's behavior
-# in a small region corresponding to a particular instance of interest by applying a 
-# linear model. However, in this particular use case, the mixture of categorical and
-# numerical values, plus the differences in ranges within each feature resulted in various
-# experinments without consistent results. Fr this particular use case, LIME was implement 
-# in models trained with the original training data, scaled training data, and normalized
-# training data. Several attempts were also made at modifying the arguments for the lime() 
-# function, such as all the possible permutations between bin_continuous, quantile_bins
-# and use_density. In the explain function, the number of permutations was increased from
-# 10 to 5000, the Euclidean and Gower distance functions were tested, and kernel_widths 
-# ranging from 0.1 to 5 were tried. 0.01 was also tried as a kernel_width, but generated
-# errors in the LIME function, and anything above 5 just seemed exaggerated. 
-
 
 # 1. Apply LIME to the new RF models ----
-# Lime explanations here are wildy inconsistent. LIME doesn't handle data well when it isn't normalized
-# or scaled.
 
-# ..1.1 Applying LIME to original Model as is ----
-# this section is expected to fail b/c the data is not normalized, or scaled. We simply tried applying LIME to the Orig RF hoping it would work like a plug-and-play kind of application. To get LIME to work on the "Original" RF model, you must retrain the model with the data normalized, or scaled. 
-lime_explainer_orig <- lime(as.data.frame(trainData[, c(1:7)]), origRF,bin_continuous = TRUE, quantile_bins=FALSE, use_density = TRUE)
-trainData[1,c(1:7)]
-lime_explanations_orig <- explain(as.data.frame(trainData[1,c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
-plot_features(lime_explanations_orig)
-
-
-# ..1.1 Applying LIME to H2O RF Model ----
-?lime()
 lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), # original training data
                               rfh2o,
                               bin_continuous = FALSE, # Having this as T generates inconsistent explanations
                                                       # b/c of the mixture of numerical and categorical (T/F) 
                                                       # features
                               quantile_bins = FALSE,
-                              use_density = TRUE
-                              #n_bins = 10
+                              use_density = TRUE,
+                              n_bins = 10
 )
-
-sampleData <- slt2data_h2o[1,]
-sampleData[c(2:6),] <- slt2data_h2o[1,]
-sampleData
-
-h2o.predict(object = rfh2o, newdata = as.h2o(sampleData[,c(1:7)]) )
-lime_explanations_rfh2o <- explain( as.data.frame(sampleData[,c(1:7)] ),   # Data to explain
+nrow(slt2_OnlyA)
+lime_explanations_rfh2o <- explain( as.data.frame(slt2_OnlyA[14,c(1:7)] ),   # Data to explain
                                     lime_explainer_rfh2o,     # Explainer to use
                                     n_labels = 1, # only 1 type of category
                                     n_features = 7, # Number of features we want to use for explanation
-                                    n_permutations = 2000,
+                                    n_permutations = 200,
                                     dist_fun = "gower"  # b/c training contains numerical and categorical(T/F) features
 #                                    kernel_width = .75,
-)
-plot_features(lime_explanations_rfh2o) 
-
-# ..1.2 Applying LIME to scaled Model ----
-
-lime_explainer_rfh2o_scaled <- lime( as.data.frame( trainData_scaled[,c(1:7)] ), # original training data
-                              rfh2o_scaled, # Model to explain
-                              bin_continuous = FALSE, # Should continuous variables be binned
-                                                      # when making the explanation
-                              quantile_bins = FALSE,
-                              use_density = FALSE
-                              #n_bins = 5
-)
-sampleData_scaled <- slt2data_h2o_scaled[1,]
-sampleData_scaled[c(2:6),] <- slt2data_h2o_scaled[1,]
-sampleData_scaled
-
-h2o.predict(object = rfh2o_scaled, newdata = as.h2o(sampleData_scaled[,c(1:7)]) )
-lime_explanations_rfh2o_scaled <- explain( as.data.frame(sampleData_scaled[,c(1:7)]),   # Data to explain
-                                    lime_explainer_rfh2o_scaled,     # Explainer to use
-                                    n_labels = 1, # only 1 type of category
-                                    n_features = 7, # Number of features we want to use for explanation
-                                    n_permutations = 2000, # the higher the number, the more consistency
-                                    dist_fun="euclidean",
-                                    kernel_width = .75
-                                    
-)
-plot_features(lime_explanations_rfh2o_scaled)
-
-# ..1.3 Applying LIME to Normalized Model ----
-sampleData_norm <- slt2data_h2o_norm[1,]
-sampleData_norm[c(2:6),] <- slt2data_h2o_norm[1,]
-sampleData_norm
-
-lime_explainer_rfh2o_norm <- lime( as.data.frame( trainData_norm[,c(1:7)] ), # original training data
-                                     rfh2o_norm,
-                                     bin_continuous = TRUE, # Setting this to F allows me to have all 7 features in the explanation
-                                     quantile_bins = FALSE,
-                                     use_density = F, #T
-                                     n_bins = 10
+#                                    feature_select = "highest_weights"
 )
 
-h2o.predict(object = rfh2o_norm, newdata = as.h2o(sampleData_norm[,c(1:7)]) )
-lime_explanations_rfh2o_norm <- explain( as.data.frame(sampleData_norm[,c(1:7)] ),   # Data to explain
-                                           lime_explainer_rfh2o_norm,     # Explainer to use
-                                           n_labels = 1, # only 1 type of category
-                                           n_features = 7, # Number of features we want to use for explanation
-                                           n_permutations = 5000,
-                                           dist_fun = "euclidean",
-                                           kernel_width = .01
-                                           #dist_fun = "gower"  # b/c training contains numerical & categorical features
-)
-plot_features(lime_explanations_rfh2o_norm)
-h2o.predict_contributions(rfh2o_norm, as.h2o(sampleData_norm[,c(1:7)]))
-
-
-# ..1.4 Applying LIME to GLM Model ----
-
-lime_explainer_glmh2o <- lime( as.data.frame( trainData[,c(1:7)] ), # original training data
-                                   glmh2o,
-                                   bin_continuous = FALSE, # Setting this to F allows me to have all 7 features in the explanation
-                                   quantile_bins = FALSE,
-                                   use_density = F, #T
-                                   n_bins = 10
-)
-sampleData <- slt2data_h2o[1980,]
-#sampleData$sameStrand <- 0
-sampleData
-h2o.predict(object = glmh2o, newdata = as.h2o(sampleData[,c(1:7)]) )
-lime_explanations_glmh2o <- explain( as.data.frame(sampleData[,c(1:7)] ),   # Data to explain
-                                         lime_explainer_glmh2o,     # Explainer to use
-                                         n_labels = 1, # only 1 type of category
-                                         n_features = 7, # Number of features we want to use for explanation
-                                         n_permutations = 1000,
-                                         #dist_fun = "euclidean",
-                                         #kernel_width = 5,
-                                         dist_fun = "gower"  # b/c training contains numerical & categorical features
-)
-plot_features(lime_explanations_glmh2o)
-h2o.predict_contributions(glmh2o, as.h2o(sampleData_norm[,c(1:7)]))
+plot_features(lime_explanations_rfh2o)
+head(lime_explanations_rfh2o)
+slt2_OnlyA[1,c(1:8)]
+lime_explainer_rfh2o$n_bins
 
 
 # F) SHAP Values ----
@@ -966,14 +751,19 @@ SHAP_H2O2 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
 SHAP_H2O3 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
 SHAP_H2O4 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
 SHAP_H2O5 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
-SHAP_H2O5
+
+class(SHAP_H2O1)
+
+
+
+slt2data[2,]
 
 
 # G) PDP ----
 # 1. Generate PDPs for the RF models ----
 
 ?partialPlot()
-h2o.partialPlot(rfh2o_scaled, data = as.h2o(slt2data_h2o_scaled), cols = "SS", plot=TRUE)
+h2o.partialPlot(rfh2o, data = as.h2o(slt2data_h2o), cols = "SS", plot=TRUE, nbins=10)
 
 h2o.partialPlot(rfh2o, data = as.h2o(ludata_h2o), cols = "SS")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "SS")
@@ -990,7 +780,3 @@ h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameDownStrand")
 #TODO - See how LIME and SHAP agree and compare
 
 #### QUESTIONS ----
-# Why are the performance metrics so different when scaling or normalizing the data,
-# but the accuracy is still extremely similar?
-
-
