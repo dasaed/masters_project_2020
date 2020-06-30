@@ -313,7 +313,6 @@ explain_forest(origRF, data = dataSetTrain[,c(1:7)], interactions = TRUE)
 
 
 # QUESTIONS ----
-# Why is this function generating different graphs? tuneRF(dataSetTrain[,c(1:7)], y = factor(dataSetTrain[,9]), ntreeTry = 400, mtryStart = 2) 
 # Is the P-Value important in random forests?
 # I get warning message saying "Using alpha for a discrete variable is not advised", whenever I use the size_measure = "p_value" in the multi-way importance plot function. I don't understand why? 
 # Why is the difference in p-value between Distance and DownDistance so high? 

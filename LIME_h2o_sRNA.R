@@ -232,9 +232,10 @@ ludata_norm$DownDistance      <- normalize_td(ludata_norm$DownDistance,
 # Load original model (save time)
 origRF <- readRDS("RF_classifier4sRNA.rds")
 
-#tuneRF(combData2[,-8], y = factor(combData2[,8]), ntreeTry = 400, mtryStart = 2)
-#set.seed(1234)
-#origRF_retrained <- randomForest(x = dataSetTrainX, y = factor(dataSetTrainY[,9]), mtry = 2, ntree = 400, importance = TRUE)
+tuneRF(combData2[,-8], y = factor(combData2[,8]), ntreeTry = 400, mtryStart = 2)
+set.seed(1234)
+origRF_retrained <- randomForest(x = dataSetTrainX, y = factor(dataSetTrainY[,9]), mtry = 2, ntree = 400, 
+                                 importance = TRUE)
 
 
 ## ..4.2 Create functions for compatibility  ----
@@ -772,6 +773,7 @@ lines(x = h2o.specificity(rfh2o_lu_performance_norm)[,"tnr"],
 
 # ..2.4 Other H2O Metrics ----
 h2o.confusionMatrix(rfh2o_slt2_performance)
+h2o.confusionMatrix(rfh2o_slt2_performance_scaled)
 plot(h2o.F1(rfh2o_slt2_performance))
 plot(rfh2o_slt2_performance, # REMINDER: TPR = Sensitivity, FPR = (1 - specificity)
      type = "roc", 
@@ -800,11 +802,10 @@ head(slt2_OnlyA_norm)
 
 
 # E) LIME ----
-# 
+#
 # LIME FUNCTION ARGUMENTS
 # x	              The training data used for training the model that should be explained.
 # model	          The model whose output should be explained
-# preprocess	    Function to transform a character vector to the format expected from the model.
 # bin_continuous  Should continuous variables be binned when making the explanation
 # n_bins	        The number of bins for continuous variables if bin_continuous = TRUE
 # quantile_bins	  Should the bins be based on n_bins quantiles or spread evenly over the range of
@@ -812,13 +813,125 @@ head(slt2_OnlyA_norm)
 # use_density     If bin_continuous = FALSE should continuous data be sampled using a kernel density 
 #                 estimation. If not, continuous features are expected to follow a normal distribution.
 #
+# LIME SETTINGS JUSTIFICATIONS
+# bin_continuous = TRUE --> Makes explanation easier, and having this setting as true helped in obtaining more consistant results.
+# quantile_bins = FALSE --> setting this to TRUE generates an error b/c of the sameStrand and sameDownStrand don't have enough variance for the algorithm to use quantile bining.  
+# use_density = TRUE --> in section A, 3.4, we showed that the features don't follow a normal distribution. Based on the explanation from LIME, we should have this setting as FALSE. 
+
+# 1. LIME in original Model as is ----
+# this section is expected to fail b/c the data is not normalized, or scaled. We simply tried applying LIME to the Orig RF hoping it would work like a plug-and-play kind of application. To get LIME to work on the "Original" RF model, you must retrain the model with the data normalized, or scaled. 
+#lime_explainer_orig <- lime(as.data.frame(trainData[, c(1:7)]), origRF,bin_continuous = TRUE, quantile_bins=FALSE, use_density = TRUE)
+#trainData[1,c(1:7)]
+#lime_explanations_orig <- explain(as.data.frame(trainData[1,c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
+#plot_features(lime_explanations_orig)
+
+# 2. LIME to H2O RF Model ----
+# Here, the training and testing data is not normalized or scaled. 
+# ..2.1 H2O RF Model, density = T ----
+sampleData <- slt2data_h2o[1,]  # A true example
+sampleData[c(2:4),] <- slt2data_h2o[1,]
+sampleData[5,] <- slt2data_h2o[1986,] # A false example
+sampleData[c(6:8),] <- slt2data_h2o[1986,]
+sampleData
+h2o.predict(object = rfh2o, newdata = as.h2o(sampleData[c(1,8),c(1:7)]) )
+lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), rfh2o,
+                              bin_continuous = FALSE, 
+                              quantile_bins = FALSE,
+                              use_density = TRUE
+)
+lime_explanations_rfh2o <- explain( as.data.frame(sampleData[,c(1:7)] ),   # Data to explain
+                                    lime_explainer_rfh2o,     # Explainer to use
+                                    n_labels = 1, # only 1 type of category
+                                    n_features = 7, # Number of features we want to use for explanation
+                                    n_permutations = 2000,
+                                    dist_fun = "gower"  
+)
+plot_features(lime_explanations_rfh2o) 
+
+# ..2.2 H2O RF Model, density = F ----
+
+lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), rfh2o,
+                              bin_continuous = TRUE, quantile_bins = FALSE,
+                              use_density = TRUE, n_bins = 10
+)
+lime_explanations_rfh2o <- explain( as.data.frame(sampleData[,c(1:7)] ),  
+                                    lime_explainer_rfh2o, n_labels = 1, 
+                                    n_features = 7, n_permutations = 2000,
+                                    dist_fun = "gower" 
+)
+plot_features(lime_explanations_rfh2o) 
+
+# 3. LIME to H2O RF scaled Model ----
+# ..3.1 H2O RF scaled Model, density = T ----
+sampleData_scaled <- slt2data_h2o_scaled[1,]  # A true example
+sampleData_scaled[c(2:4),] <- slt2data_h2o_scaled[1,]
+sampleData_scaled[5,] <- slt2data_h2o_scaled[1986,] # A false example
+sampleData_scaled[c(6:8),] <- slt2data_h2o_scaled[1986,]
+sampleData_scaled
+h2o.predict(object = rfh2o_scaled, newdata = as.h2o(sampleData_scaled[c(1,8),c(1:7)]))
+lime_explainer_rfh2o_scaled <- lime( as.data.frame( trainData_scaled[,c(1:7)] ), rfh2o_scaled,
+                              bin_continuous = FALSE, auantile_bins = FALSE, use_density = TRUE) 
+lime_explanations_rfh2o_scaled <- explain( as.data.frame(sampleData_scaled[,c(1:7)]),  
+                                    lime_explainer_rfh2o_scaled, n_labels = 1, 
+                                    n_features = 7, n_permutations = 2000, dist_fun = "gower" )
+plot_features(lime_explanations_rfh2o_scaled)
+
+# ..3.2 H2O RF scaled Model, density = F ----
+lime_explainer_rfh2o_scaled <- lime( as.data.frame( trainData_scaled[,c(1:7)] ), rfh2o_scaled,
+                                     bin_continuous = TRUE, quantile_bins = FALSE,
+                                     use_density = FALSE, n_bins = 10)
+lime_explanations_rfh2o_scaled <- explain( as.data.frame(sampleData_scaled[,c(1:7)]),   # Data to explain
+                                           lime_explainer_rfh2o_scaled,     # Explainer to use
+                                           n_labels = 1, n_features = 7, 
+                                           n_permutations = 2000, dist_fun = "gower")
+plot_features(lime_explanations_rfh2o_scaled)
+
+# 4. LIME to H2O RF normalized Model ----
+# ..4.1 H2O RF Normalized Model, density = T ----
+sampleData_norm <- slt2data_h2o_norm[1,]  # A true example
+sampleData_norm[c(2:4),] <- slt2data_h2o_norm[1,]
+sampleData_norm[5,] <- slt2data_h2o_norm[1986,] # A false example
+sampleData_norm[c(6:8),] <- slt2data_h2o_norm[1986,]
+sampleData_norm
+h2o.predict(object = rfh2o_norm, newdata = as.h2o(sampleData_norm[c(1,8),c(1:7)]) )
+lime_explainer_rfh2o_norm <- lime( as.data.frame( trainData_norm[,c(1:7)] ), rfh2o_norm,
+                                   bin_continuous = FALSE, quantile_bins = FALSE, use_density = TRUE)
+lime_explanations_rfh2o_norm <- explain( as.data.frame(sampleData_norm[,c(1:7)] ),
+                                         lime_explainer_rfh2o_norm, n_labels = 1, 
+                                         n_features = 7, n_permutations = 2000, dist_fun = "gower" )
+plot_features(lime_explanations_rfh2o_norm)
+
+# ..4.2 Applying LIME to Normalized Model ----
+lime_explainer_rfh2o_norm <- lime( as.data.frame( trainData_norm[,c(1:7)] ), rfh2o_norm,
+                                     bin_continuous = TRUE, quantile_bins = FALSE,
+                                     use_density = FALSE,  n_bins = 10)
+lime_explanations_rfh2o_norm <- explain( as.data.frame(sampleData_norm[,c(1:7)] ), lime_explainer_rfh2o_norm,   
+                                         n_labels = 1,  n_features = 7, 
+                                         n_permutations = 2000, dist_fun = "gower"  
+                                         )
+
+plot_features(lime_explanations_rfh2o_norm)
+
+# ..1.5 Applying LIME to GLM Model ----
+
+lime_explainer_glmh2o <- lime( as.data.frame( trainData[,c(1:7)] ),glmh2o, 
+                               bin_continuous = FALSE, quantile_bins = FALSE, 
+                               use_density = FALSE, n_bins = 10 )
+lime_explanations_glmh2o <- explain( as.data.frame(sampleData[,c(1:7)] ), lime_explainer_glmh2o,   
+                                         n_labels = 1,  n_features = 7, 
+                                         n_permutations = 2000, dist_fun = "gower"  )
+plot_features(lime_explanations_glmh2o)
+
+# LIME CONCLUSIONS ----
 #
 # A known problem with LIME is that explanations may be inconsistant from one instance to the
 # next, even when the instances are very similar to each. With this in mind, each instance
-# we tested was tested at least 5 times (ie we manually ran this section over and over at
-# least 5 times), and with a high enough number of permutations,
+# we tested was tested at least 4 times (ie we manually ran this section over and over at
+# least 4 times), and with a high enough number of permutations,
 # we managed to get somewhat consistent results. However, some of the results obtained from
-# LIME were heavily flawed as it would yield explanations that contradicted the result. 
+# LIME were heavily flawed as sometimes it would yield explanations that contradicted the result. 
+# Depending on the data to be explain, it would sometimes leave out sameStrand and sameDownStrand from the 
+# explanation.
 # Additionally, a GLM was also trained to attempt to measure the variance of the data, but the
 # results from the GLM yielded an R^2 value between 0.2 and 0.3, with a max recall of 0.07. In
 # other words, the GLM model was only predicting false instances, and since LIME uses linear 
@@ -841,139 +954,22 @@ head(slt2_OnlyA_norm)
 # errors in the LIME function, and anything above 5 just seemed exaggerated. 
 
 
-# 1. Apply LIME to the new RF models ----
-# Lime explanations here are wildy inconsistent. LIME doesn't handle data well when it isn't normalized
-# or scaled.
-
-# ..1.1 Applying LIME to original Model as is ----
-# this section is expected to fail b/c the data is not normalized, or scaled. We simply tried applying LIME to the Orig RF hoping it would work like a plug-and-play kind of application. To get LIME to work on the "Original" RF model, you must retrain the model with the data normalized, or scaled. 
-lime_explainer_orig <- lime(as.data.frame(trainData[, c(1:7)]), origRF,bin_continuous = TRUE, quantile_bins=FALSE, use_density = TRUE)
-trainData[1,c(1:7)]
-lime_explanations_orig <- explain(as.data.frame(trainData[1,c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
-plot_features(lime_explanations_orig)
-
-
-# ..1.1 Applying LIME to H2O RF Model ----
-?lime()
-lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), # original training data
-                              rfh2o,
-                              bin_continuous = FALSE, # Having this as T generates inconsistent explanations
-                                                      # b/c of the mixture of numerical and categorical (T/F) 
-                                                      # features
-                              quantile_bins = FALSE,
-                              use_density = TRUE
-                              #n_bins = 10
-)
-
-sampleData <- slt2data_h2o[1,]
-sampleData[c(2:6),] <- slt2data_h2o[1,]
-sampleData
-
-h2o.predict(object = rfh2o, newdata = as.h2o(sampleData[,c(1:7)]) )
-lime_explanations_rfh2o <- explain( as.data.frame(sampleData[,c(1:7)] ),   # Data to explain
-                                    lime_explainer_rfh2o,     # Explainer to use
-                                    n_labels = 1, # only 1 type of category
-                                    n_features = 7, # Number of features we want to use for explanation
-                                    n_permutations = 2000,
-                                    dist_fun = "gower"  # b/c training contains numerical and categorical(T/F) features
-#                                    kernel_width = .75,
-)
-plot_features(lime_explanations_rfh2o) 
-
-# ..1.2 Applying LIME to scaled Model ----
-
-lime_explainer_rfh2o_scaled <- lime( as.data.frame( trainData_scaled[,c(1:7)] ), # original training data
-                              rfh2o_scaled, # Model to explain
-                              bin_continuous = FALSE, # Should continuous variables be binned
-                                                      # when making the explanation
-                              quantile_bins = FALSE,
-                              use_density = FALSE
-                              #n_bins = 5
-)
-sampleData_scaled <- slt2data_h2o_scaled[1,]
-sampleData_scaled[c(2:6),] <- slt2data_h2o_scaled[1,]
-sampleData_scaled
-
-h2o.predict(object = rfh2o_scaled, newdata = as.h2o(sampleData_scaled[,c(1:7)]) )
-lime_explanations_rfh2o_scaled <- explain( as.data.frame(sampleData_scaled[,c(1:7)]),   # Data to explain
-                                    lime_explainer_rfh2o_scaled,     # Explainer to use
-                                    n_labels = 1, # only 1 type of category
-                                    n_features = 7, # Number of features we want to use for explanation
-                                    n_permutations = 2000, # the higher the number, the more consistency
-                                    dist_fun="euclidean",
-                                    kernel_width = .75
-                                    
-)
-plot_features(lime_explanations_rfh2o_scaled)
-
-# ..1.3 Applying LIME to Normalized Model ----
-sampleData_norm <- slt2data_h2o_norm[1,]
-sampleData_norm[c(2:6),] <- slt2data_h2o_norm[1,]
-sampleData_norm
-
-lime_explainer_rfh2o_norm <- lime( as.data.frame( trainData_norm[,c(1:7)] ), # original training data
-                                     rfh2o_norm,
-                                     bin_continuous = TRUE, # Setting this to F allows me to have all 7 features in the explanation
-                                     quantile_bins = FALSE,
-                                     use_density = F, #T
-                                     n_bins = 10
-)
-
-h2o.predict(object = rfh2o_norm, newdata = as.h2o(sampleData_norm[,c(1:7)]) )
-lime_explanations_rfh2o_norm <- explain( as.data.frame(sampleData_norm[,c(1:7)] ),   # Data to explain
-                                           lime_explainer_rfh2o_norm,     # Explainer to use
-                                           n_labels = 1, # only 1 type of category
-                                           n_features = 7, # Number of features we want to use for explanation
-                                           n_permutations = 5000,
-                                           dist_fun = "euclidean",
-                                           kernel_width = .01
-                                           #dist_fun = "gower"  # b/c training contains numerical & categorical features
-)
-plot_features(lime_explanations_rfh2o_norm)
-h2o.predict_contributions(rfh2o_norm, as.h2o(sampleData_norm[,c(1:7)]))
-
-
-# ..1.4 Applying LIME to GLM Model ----
-
-lime_explainer_glmh2o <- lime( as.data.frame( trainData[,c(1:7)] ), # original training data
-                                   glmh2o,
-                                   bin_continuous = FALSE, # Setting this to F allows me to have all 7 features in the explanation
-                                   quantile_bins = FALSE,
-                                   use_density = F, #T
-                                   n_bins = 10
-)
-sampleData <- slt2data_h2o[1980,]
-#sampleData$sameStrand <- 0
-sampleData
-h2o.predict(object = glmh2o, newdata = as.h2o(sampleData[,c(1:7)]) )
-lime_explanations_glmh2o <- explain( as.data.frame(sampleData[,c(1:7)] ),   # Data to explain
-                                         lime_explainer_glmh2o,     # Explainer to use
-                                         n_labels = 1, # only 1 type of category
-                                         n_features = 7, # Number of features we want to use for explanation
-                                         n_permutations = 1000,
-                                         #dist_fun = "euclidean",
-                                         #kernel_width = 5,
-                                         dist_fun = "gower"  # b/c training contains numerical & categorical features
-)
-plot_features(lime_explanations_glmh2o)
-h2o.predict_contributions(glmh2o, as.h2o(sampleData_norm[,c(1:7)]))
-
-
 # F) SHAP Values ----
+
 # 1. something ... ----
-SHAP_H2O1 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
-SHAP_H2O2 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
-SHAP_H2O3 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
-SHAP_H2O4 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
-SHAP_H2O5 <- h2o.predict_contributions(rfh2o, as.h2o(slt2_OnlyA[14,c(1:7)]))
-SHAP_H2O5
+?partialPlot()
+SHAP_H2O1 <- h2o.predict_contributions(rfh2o_scaled, as.h2o(sampleData_scaled[1,c(1:7)]))
+
+SHAP_H2O1
 
 
 # G) PDP ----
+
 # 1. Generate PDPs for the RF models ----
 
 ?partialPlot()
-h2o.partialPlot(rfh2o_scaled, data = as.h2o(slt2data_h2o_scaled), cols = "SS", plot=TRUE)
+?h2o.partialPlot
+h2o.partialPlot(rfh2o_scaled, data = as.h2o(slt2data_h2o_scaled), cols = "SS", plot=TRUE, nbins=2)
 
 h2o.partialPlot(rfh2o, data = as.h2o(ludata_h2o), cols = "SS")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "SS")
@@ -985,7 +981,6 @@ h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "DownDistance")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameStrand")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameDownStrand")
 
-#TODO - Create model with scaled data and try LIME
 #TODO - PDPs for classification tasks, instead of regression
 #TODO - See how LIME and SHAP agree and compare
 
