@@ -1,52 +1,70 @@
-#!/usr/bin/env Rscript
-# Some terminology
-# OrigRF/Orig RF = Original random forest as found in https://github.com/BioinformaticsLabAtMUN/sRNARanking
+---
+title: "Interpretability Models in the Random Forest sRNA"
+output: html_notebook
+---
 
-# I) PRE-SETUP ----
-# 1. Clear console and environment ----
+# Introduction
 
+Key Terms
+* OrigRF/Orig RF = Original random forest as found in [link](https://github.com/BioinformaticsLabAtMUN/sRNARanking)
+* OrigRF_[scaled/normalized] = refers to any model that was trained in the same manner(same libraries and settings) as in the Original random forest model, but using scaled or normalized data. 
+  *  By scaling the data we mean scaling and centering
+  *  By normalizing 
+* "SS" = the free energy of the predicted secondary structure of the sRNA - mostly negative values
+* "Pos10wrtsRNAStart" = distance to their closest predicted promoter site
+* "DistTerm" = distance to their closest predicted Rho-independent terminator 
+* "Distance" = distance to the closest reading frame on the LEFT("upstream") side
+* "sameStrand" = boolean, if transcription is going in the same direction as the ORF(Left Open Reading Frame)
+  *  ORF = genomic sequence that's supposed to code for a protein
+* "DownDistance"  = distance to the closest reading frame on the RIGHT("downstream") side
+* "sameDownStrand" =  boolean, if transcription is going in the same direction as the RORF(Right Open Reading Frame)
+
+# I) PRE-SETUP
+
+Some OPTIONAL memory cleaning (useful if you want to run this from R Studio and with a clean environment)
+```{r}
+# This section is just about getting the environment ready and cleaned up. Since this project was originally written as a regular R script, and worked from within R Studio, it was just usefull in resetting and cleaning up the the environment, and so this block of code is optional
 clc <- function() cat("\014") ; clc()
 remove(list = ls())
 gc()
+```
 
-# 2. Install and load libraries ----
+# 1. Install required libraries 
 
-# uncomment the following lines if you need to install the libraries
-# install.packages("lime")
-# install.packages("ROCR")
-# install.packages("PRROC")
+The following block of code is copied from the h2o documentation site, as it's their recommended way for downloading and installing h2o for R. Here is the [link](http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/index.html) for those interested in it.
 
+```{r}
+# The following two commands remove any previously installed H2O packages for R.
+if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
+if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
+# Next, we download packages that H2O depends on.
+pkgs <- c("RCurl","jsonlite")
+for (pkg in pkgs) {
+  if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+}
+# Now we download, install and initialize the H2O package for R.
+install.packages("h2o", type="source", repos="http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/R")
+```
+
+The rest of the libraries can be installed in the same way as with any other library.
+```{r}
+install.packages("lime")
+install.packages("ROCR")
+install.packages("PRROC")
+install.packages("randomForest")
+```
+
+# 2. Load the libraries ----
+
+```{r}
+library("h2o")          # ML model building
 library("lime")         # ML local interpretation
 library("ROCR")         # ML evaluation
 library("PRROC")        # ML evaluation
 library("randomForest") # ML model building
+```
 
-
-## The following is copied from the h2o documentation site, as it's their recommended way for
-## downloading and installing h2o for R (http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/index.html)
-## The following two commands remove any previously installed H2O packages for R.
-#if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
-#if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
-## Next, we download packages that H2O depends on.
-#pkgs <- c("RCurl","jsonlite")
-#for (pkg in pkgs) {
-#  if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
-#}
-## Now we download, install and initialize the H2O package for R.
-#install.packages("h2o", type="source", repos="http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/R")
-library("h2o")          # ML model building
-
-# 3. Load and preprocess data ----
-### Feature Explanations
-## "SS" = the free energy of the predicted secondary structure of the sRNA - mostly negative values
-## "Pos10wrtsRNAStart" = distance to their closest predicted promoter site
-## "DistTerm" = distance to their closest predicted Rho-independent terminator 
-## "Distance", = distance to the closest reading frame on the LEFT("upstream") side
-## "sameStrand" = boolean, if transcription is going in the same direction as the ORF(Left Open Reading Frame)
-#     ORF = genomic sequence that's supposed to code for a protein
-## "DownDistance"  = distance to the closest reading frame on the RIGHT("downstream") side
-## "sameDownStrand" =  boolean, if transcription is going in the same direction as the RORF(Right Open Reading Frame)
- 
+# 3. Load and preprocess the data 
 # ..3.1 Load Training Data ----
 trainDataSet <- read.csv("./tests/combinedData.csv", header = TRUE)
 trainDataSet[,"Class"] <- as.logical(trainDataSet[,"Class"]) # guarantees that our h2o model trains the random forest (RF) as a classification tree and not a regression tree
