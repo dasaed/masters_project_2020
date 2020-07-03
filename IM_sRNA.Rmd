@@ -2,15 +2,27 @@
 title: "Interpretability Models in the Random Forest sRNA"
 output: html_notebook
 ---
+# Table of Contents
+1. PRE-SETUP = We are simply getting the environment and data ready
+1. TRAIN NEW H2O MODEL = To make use of H2O's libraries, we need to create the models in H2O (ie. our original RF model cannot be directly converted to an h2o model)
+1. COMPARE MODEL'S PREDICTIONS = We have the OrigRF and all the other new models generate predictions on the testing data
+1. COMPARE MODEL'S METRICS = A true validation of the models' performance, and a correct way of validating if our new models make good proxies for the original model
+1. LIME = Here we actually begin to apply LIME to our RF models
+1. SHAP Values = We use the H2O library to generate the SHAP values for our H2O RF model
+1. PDPs = Similar to the previous section, we use the H2O library to generate the PDPs for the H2O RF model
 
-# Introduction
+## Introduction
 The goal of this project was to apply interpretability models to the random forest classifier in the PeerJ article ["Prioritizing bona fide bacterial small RNAs with machine learning classifiers"](https://peerj.com/articles/6304/) with the purposes of gaining deeper insights into the prioritization of bona fide bacterial sRNAs. 
 
-Some key Terms
+
+## Some key Terms
 * OrigRF/Orig RF = Original random forest as found in [link](https://github.com/BioinformaticsLabAtMUN/sRNARanking)
 * OrigRF_[scaled/normalized] = refers to any model that was trained in the same manner(same libraries and settings) as in the Original random forest model, but using scaled or normalized data. 
   *  By scaling the data we mean scaling and centering
-  *  By normalizing 
+  *  By normalizing we mean fit the values between 0 and 1
+* RFE = Random Forest Explainer
+* RF = Random Forest
+* IM = Interpretability Model
 * "SS" = the free energy of the predicted secondary structure of the sRNA - mostly negative values
 * "Pos10wrtsRNAStart" = distance to their closest predicted promoter site
 * "DistTerm" = distance to their closest predicted Rho-independent terminator 
@@ -20,9 +32,10 @@ Some key Terms
 * "DownDistance"  = distance to the closest reading frame on the RIGHT("downstream") side
 * "sameDownStrand" =  boolean, if transcription is going in the same direction as the RORF(Right Open Reading Frame)
 
-# I) PRE-SETUP
+**Side note:*** When used the word original to refer to the RF model created in the base article, or to refer to models that were created(trained) in the same way as the base random forest model. 
 
-Some OPTIONAL memory cleaning (useful if you want to run this from R Studio and with a clean environment)
+# I) PRE-SETUP
+This section is all about getting the libraries and data needed to run this R notebook. We will preprocess the data and load the original model. We start with some **OPTIONAL** memory cleaning (useful if you want to run this from R Studio and with a clean environment)
 ```{r}
 # This section is just about getting the environment ready and cleaned up. Since this project was originally written as a regular R script, and worked from within R Studio, it was just usefull in resetting and cleaning up the the environment, and so this block of code is optional
 clc <- function() cat("\014") ; clc()
@@ -32,37 +45,43 @@ gc()
 
 ## 1. Install required libraries 
 
-The following block of code is copied from the h2o documentation site, as it's their recommended way for downloading and installing h2o for R. Here is the [link](http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/index.html) for those interested in it.
+The following code is based on the h2o documentation site, as it's their recommended way for downloading and installing h2o for R, with only the first if being added as to prevent accidental reinstallations. Here is the [link](http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/index.html) for those interested in it.  
 
 ```{r}
-# The following two commands remove any previously installed H2O packages for R.
-if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
-if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
-# Next, we download packages that H2O depends on.
-pkgs <- c("RCurl","jsonlite")
-for (pkg in pkgs) {
-  if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
-}
-# Now we download, install and initialize the H2O package for R.
-install.packages("h2o", type="source", repos="http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/R")
+
+if (! ("h2o" %in% rownames(installed.packages()))) { 
+  
+    # The following two commands remove any previously installed H2O packages for R.
+    if ("package:h2o" %in% search()) { detach("package:h2o", unload=TRUE) }
+    if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
+    # Next, we download packages that H2O depends on.
+    pkgs <- c("RCurl","jsonlite")
+    for (pkg in pkgs) {
+      if (! (pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+    }
+    # Now we download, install and initialize the H2O package for R.
+    install.packages("h2o", type="source", repos="http://h2o-release.s3.amazonaws.com/h2o/rel-zahradnik/4/R")
+}  
 ```
 
 The rest of the libraries can be installed in the same way as with any other library.
 ```{r}
-install.packages("lime")
-install.packages("ROCR")
-install.packages("PRROC")
-install.packages("randomForest")
+packages <- c("lime", "ROCR", "PRROC", "randomForest", "randomForestExplainer")
+for (package in packages) {
+  if (! (package %in% rownames(installed.packages()))) { install.packages(package) }
+}
+
 ```
 
 ## 2. Load the libraries 
 
 ```{r}
 library("h2o")          # ML model building
-library("lime")         # ML local interpretation
 library("ROCR")         # ML evaluation
 library("PRROC")        # ML evaluation
 library("randomForest") # ML model building
+library("randomForestExplainer") # ML Global interpretation
+library("lime")         # ML local interpretation
 ```
 
 ## 3. Load and preprocess the data 
@@ -319,13 +338,13 @@ rfh2o <- h2o.randomForest(
 ### 6.2 Build model with Scaled Training data 
 ```{r}
 rfh2o_scaled <- h2o.randomForest( 
-  training_frame = trainData_scaled, # training using the standarized data
-  x = 1:7,                   # features to use to generate the prediction
-  y = 9,                     # Class type -> what we want to predict
-  model_id = "rf2_sRNA",     # name of model in h2o
-  ntrees = 400,              # max number of trees  
-  seed = 1234,               # seed, has to be set WITHIN the h2o function and it's supposed to be different from "R's seed", so results might not be exactly the same as orig model, but should be similar enough
-  mtries = 2,                 # Same as original model 
+  training_frame = trainData_scaled,
+  x = 1:7,                
+  y = 9,                     
+  model_id = "rf2_sRNA",     
+  ntrees = 400,              
+  seed = 1234,              
+  mtries = 2,                
   max_depth = 30
 )
 ```
@@ -333,22 +352,19 @@ rfh2o_scaled <- h2o.randomForest(
 ### 6.3 Build model with Norm Training data
 ```{r}
 rfh2o_norm <- h2o.randomForest( 
-  training_frame = trainData_norm, # Training using the normalized data
-  x = 1:7,                   # features to use to generate the prediction
-  y = 9,                     # Class type -> what we want to predict
-  model_id = "rf3_sRNA",     # name of model in h2o
-  ntrees = 400,              # max number of trees  
-  seed = 1234,               # seed, has to be set WITHIN the h2o function
-  # and it's supposed to be different from "R's seed", so 
-  # results might not be exactly the same as orig model, but
-  # should be similar enough
-  mtries = 2,                 # Same as original model 
+  training_frame = trainData_norm, 
+  x = 1:7,                  
+  y = 9,                    
+  model_id = "rf3_sRNA",     
+  ntrees = 400,               
+  seed = 1234,               
+  mtries = 2,                  
   max_depth = 30
 )
 ```
 
 ### 6.4 BONUS: Build GLM model
-As we were doing tests with LIME, we discovered that it yielded irregular responses, and as a result, the explanations could not be trusted. It seems to be a known issue that LIME is not perfect for every model, and that it struggles with data that is highly diverse. In this use case, our data contains mixed numerical and categorical features, significantly different scales and magnitudes in our numercial features, and an inbalanced data sets that favors predictions of sRNAs being false. Since lime creates a local interpretable linear model for its explanations, the GLM constructed here was simply to verify the hypothesis that a linear model would be unable to explain the data. The "unbalanced-ness" seems to create models where the features tend always support a result of "false", while claiming that all the features are against a result of true. 
+As we were doing tests with LIME, we discovered that it yielded irregular responses, and as a result, the explanations could not be trusted at the time. It seems to be a known issue that LIME is not perfect for every model, and that it struggles with data that is highly diverse. In this use case, our data contains mixed numerical and categorical features, significantly different scales and magnitudes in our numercial features, and an inbalanced data sets that favors predictions of sRNAs being false. Since lime creates a local interpretable linear model for its explanations, the GLM constructed here was simply to verify the hypothesis that a linear model would be unable to explain the data. The "unbalanced-ness" seems to create models where the features tend always support a result of "false", while claiming that all the features are against a result of true, which will be evicenced in section 15.1.
 
 ```{r}
 glmh2o <- h2o.glm( # https://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/glm.html 
@@ -525,7 +541,7 @@ nrow( slt2_predictions[slt2_predictions$origVsH2O == "BOTH_WRONG",] )
 nrow( slt2_predictions[slt2_predictions$origVsH2O == "BOTH_RIGHT",] )
 ```
 
-#### 10.5 Compare OrigRF vs H2O Model Scaled 
+#### 10.2.5 Compare OrigRF vs H2O Model Scaled 
 
 ```{r}
 nrow( slt2_predictions[slt2_predictions$origVsH2OScaled == "OnlyA",] )
@@ -534,7 +550,7 @@ nrow( slt2_predictions[slt2_predictions$origVsH2OScaled == "BOTH_WRONG",] )
 nrow( slt2_predictions[slt2_predictions$origVsH2OScaled == "BOTH_RIGHT",] )
 ```
 
-#### 10.6 Compare OrigRF vs H2O Model Normalized 
+#### 10.2.6 Compare OrigRF vs H2O Model Normalized 
 ```{r}
 nrow( slt2_predictions[slt2_predictions$origVsH2ONorm == "OnlyA",] )
 nrow( slt2_predictions[slt2_predictions$origVsH2ONorm == "OnlyB",] )
@@ -761,25 +777,40 @@ metrics_table
 
 #### 13.1.2 Accuracy graphs based on different thresholds("cutoff")
 
+The Legend for the graphs:
+  *  Blue = OrigRF
+  *  Magenta = OrigRF but scaled
+  *  Black = OrigRF but normalized
+  *  Red = H2O RF model
+  *  Brown = H2O RF model with scaled data
+  *  Green  = H2O RF model with normalized data
+
 ```{r}
 # SLT2 Accuracy Plot
-plot(origRF_slt2_performance$acc, col = "blue", lwd = 5) 
+plot(origRF_slt2_performance$acc, col = "blue", lwd = 5, main = "SLT2 Accuracy") 
 lines(as.double(unlist(origRF_scaled_slt2_performance$acc@x.values)), as.double(unlist(origRF_scaled_slt2_performance$acc@y.values)), col = "magenta", lwd = 4) 
-lines(as.double(unlist(origRF_scaled_slt2_performance$acc@x.values)), as.double(unlist(origRF_scaled_slt2_performance$acc@y.values)), col = "black", lwd = 1) 
+lines(as.double(unlist(origRF_norm_slt2_performance$acc@x.values)), as.double(unlist(origRF_norm_slt2_performance$acc@y.values)), col = "black", lwd = 1) 
 lines(h2o.accuracy(rfh2o_slt2_performance), type = "l", col = "red", lwd = 3)
 lines(h2o.accuracy(rfh2o_slt2_performance_scaled), type = "l", col = "brown", lwd = 3)
 lines(h2o.accuracy(rfh2o_slt2_performance_norm), type = "l", col = "green", lwd = 3)
 
 # LU Accuracy Plot
-plot(origRF_lu_performance$acc, col = "blue", lwd = 5)
+plot(origRF_lu_performance$acc, col = "blue", lwd = 5, main = "LU Accuracy")
 lines(as.double(unlist(origRF_scaled_lu_performance$acc@x.values)), as.double(unlist(origRF_scaled_lu_performance$acc@y.values)), col = "magenta", lwd = 4) 
-lines(as.double(unlist(origRF_scaled_lu_performance$acc@x.values)), as.double(unlist(origRF_scaled_lu_performance$acc@y.values)), col = "black", lwd = 1) 
+lines(as.double(unlist(origRF_norm_lu_performance$acc@x.values)), as.double(unlist(origRF_norm_lu_performance$acc@y.values)), col = "black", lwd = 1) 
 lines(h2o.accuracy(rfh2o_lu_performance), type = "l", col = "red", lwd = 3)
 lines(h2o.accuracy(rfh2o_lu_performance_scaled), type = "l", col = "brown", lwd = 3)
 lines(h2o.accuracy(rfh2o_lu_performance_norm), type = "l", col = "green", lwd = 3)
 ```
 
 ### 13.2 AUCPR 
+The Legend for the graphs:
+  *  Blue = OrigRF
+  *  Magenta = OrigRF but scaled
+  *  Black = OrigRF but normalized
+  *  Red = H2O RF model
+  *  Brown = H2O RF model with scaled data
+  *  Green  = H2O RF model with normalized data
 ```{r}
 metrics_table["origRF_slt2_perf","AUCPR"] <- origRF_slt2_performance$pr$auc.integral
 metrics_table["origRF_scaled_slt2_perf","AUCPR"] <- origRF_scaled_slt2_performance$pr$auc.integral
@@ -796,12 +827,8 @@ metrics_table["rfh2o_lu_perf_scaled", "AUCPR"] <- h2o.aucpr(rfh2o_lu_performance
 metrics_table["rfh2o_lu_perf_norm", "AUCPR"] <- h2o.aucpr(rfh2o_lu_performance_norm)
 
 metrics_table
-```
 
-
-
-```{r}
-plot(origRF_slt2_performance$PR,  col = "blue", lwd = 5 )
+plot(origRF_slt2_performance$PR,  col = "blue", lwd = 5, main = "SLT2 PR Curve" )
 lines(as.double(unlist(origRF_scaled_slt2_performance$PR@x.values)), as.double(unlist(origRF_scaled_slt2_performance$PR@y.values)),  col = "magenta", lwd = 4 )
 lines(as.double(unlist(origRF_norm_slt2_performance$PR@x.values)), as.double(unlist(origRF_norm_slt2_performance$PR@y.values)),  col = "black", lwd = 2 )
 
@@ -819,7 +846,7 @@ lines(x = h2o.recall(rfh2o_slt2_performance_norm)[,"tpr"],
 )
 
 
-plot(origRF_lu_performance$PR,  col = "blue", lwd = 5 )
+plot(origRF_lu_performance$PR,  col = "blue", lwd = 5, main = "LU PR Curve" )
 lines(as.double(unlist(origRF_scaled_lu_performance$PR@x.values)), as.double(unlist(origRF_scaled_lu_performance$PR@y.values)),  col = "magenta", lwd = 4 )
 lines(as.double(unlist(origRF_norm_lu_performance$PR@x.values)), as.double(unlist(origRF_norm_lu_performance$PR@y.values)),  col = "black", lwd = 2 )
 lines(x = h2o.recall(rfh2o_lu_performance)[,"tpr"],
@@ -837,8 +864,15 @@ lines(x = h2o.recall(rfh2o_lu_performance_norm)[,"tpr"],
 ```
 
 ### 13.3 Sensitivy vs Specificity Graph 
-
-plot(origRF_slt2_performance$SS, col = "blue", lwd = 5)
+The Legend for the graphs:
+  *  Blue = OrigRF
+  *  Magenta = OrigRF but scaled
+  *  Black = OrigRF but normalized
+  *  Red = H2O RF model
+  *  Brown = H2O RF model with scaled data
+  *  Green  = H2O RF model with normalized data
+```{r}
+plot(origRF_slt2_performance$SS, col = "blue", lwd = 5, main = "SLT2 Sensitivity vs Specificity")
 lines(as.double(unlist(origRF_scaled_slt2_performance$SS@x.values)), as.double(unlist(origRF_scaled_slt2_performance$SS@y.values)),  col = "magenta", lwd = 4 )
 lines(as.double(unlist(origRF_norm_slt2_performance$SS@x.values)), as.double(unlist(origRF_norm_slt2_performance$SS@y.values)),  col = "black", lwd = 2 )
 
@@ -856,9 +890,7 @@ lines(x = h2o.specificity(rfh2o_slt2_performance_norm)[,"tnr"],
       col = "green", type = "l", lwd = 3
 )
 
-
-
-plot(origRF_lu_performance$SS, col = "blue", lwd = 5)
+plot(origRF_lu_performance$SS, col = "blue", lwd = 5, main = "LU Sensitivity vs Specificity")
 lines(as.double(unlist(origRF_scaled_lu_performance$SS@x.values)), as.double(unlist(origRF_scaled_lu_performance$SS@y.values)),  col = "magenta", lwd = 4 )
 lines(as.double(unlist(origRF_norm_lu_performance$SS@x.values)), as.double(unlist(origRF_norm_lu_performance$SS@y.values)),  col = "black", lwd = 2 )
 lines(x = h2o.specificity(rfh2o_lu_performance)[,"tnr"],
@@ -868,21 +900,24 @@ lines(x = h2o.specificity(rfh2o_lu_performance)[,"tnr"],
 
 lines(x = h2o.specificity(rfh2o_lu_performance_scaled)[,"tnr"],
       y = h2o.sensitivity(rfh2o_lu_performance_scaled)[,"tpr"],
-      col = "green", type = "l", lwd = 3
+      col = "brown", type = "l", lwd = 3
 )
 
 lines(x = h2o.specificity(rfh2o_lu_performance_norm)[,"tnr"],
       y = h2o.sensitivity(rfh2o_lu_performance_norm)[,"tpr"],
-      col = "magenta", type = "l", lwd = 3
+      col = "green", type = "l", lwd = 3
 )
-
+```
 
 ### 13.4 Other H2O Metrics 
+Some additional information that's easily obtainable from the H2O library. 
+
+```{r}
 h2o.confusionMatrix(rfh2o_slt2_performance)
 h2o.confusionMatrix(rfh2o_slt2_performance_scaled)
 h2o.confusionMatrix(rfh2o_slt2_performance_norm)
 
-plot(h2o.F1(rfh2o_slt2_performance), col = "blue")
+plot(h2o.F1(rfh2o_slt2_performance), col = "blue", main = "F1 Performance")
 lines(h2o.F1(rfh2o_slt2_performance_scaled), col = "red")
 lines(h2o.F1(rfh2o_slt2_performance_norm), col = "orange")
 
@@ -901,10 +936,49 @@ plot(rfh2o_lu_performance,
      cex = 0.2,
      pch = 10
 )
+```
+
+# V) RANDOM FOREST EXPLAINER
+
+Random Forest explainer is a library that allows the user to understand the structure the structure of a random forest by exploring its nodes, feature importance, and finding relationships between the main features. Most of the graphs generated by the RFE
+
+A lot of information and explanations can be found in the following [link](https://modeloriented.github.io/randomForestExplainer/articles/randomForestExplainer.html).
+
+*REMINDER: Feature Explanations*
+  * "SS" = the free energy of the predicted secondary structure of the sRNA - mostly negative values
+  * "Pos10wrtsRNAStart" = distance to their closest predicted promoter site
+  * "DistTerm" = distance to their closest predicted Rho-independent terminator 
+  * "Distance", = distance to the closest reading frame on the LEFT("upstream") side
+  * "sameStrand" = boolean, if transcription is going in the same direction as the ORF(Left Open Reading Frame)
+     * ORF = genomic sequence that's supposed to code for a protein
+  * "DownDistance"  = distance to the closest reading frame on the RIGHT("downstream") side
+  * "sameDownStrand" =  boolean, if transcription is going in the same direction as the RORF(Right Open Reading Frame)
+
+
+## 14. Minimal Depth Distribution
+
+* "Note that the depth of a tree is equal to the length of the longest path from root to leave in this tree. This equals the maximum depth of a variable in this tree plus one, as leaves are by definition not split by any variable." [-CRAN Repository](https://cran.r-project.org/web/packages/randomForestExplainer/vignettes/randomForestExplainer.html)
+
+```{r}
+
+min_depth_frame_origRF <- min_depth_distribution(origRF) # Obtain the distribution of minimal depth
+min_depth_frame_origRF
+#plot_min_depth_distribution(origRF, mean_sample = "all_trees") # Same as plotting the min depth frame, but slower
+plot_min_depth_distribution(min_depth_frame_origRF, 
+                            mean_sample = "all_trees" # "relevant_trees", "all_trees", or "top_trees"
+                            #k = 7 # num of features to plot, 10 by default, but we only have 7, so this is optional as well
+                            #mean_scale = TRUE # False by default
+                            )
+# * Mmin depth in this package seems to mean what is the first time this variable is used to split the tree
+# * There is an inverse relationship between times_a_root and mean_min_depth 
+
+```
+
 
 # VI) LIME
 
-LIME FUNCTION ARGUMENTS
+**LIME FUNCTION ARGUMENTS**
+
 * x	              The training data used for training the model that should be explained.
 * model	          The model whose output should be explained
 * bin_continuous  Should continuous variables be binned when making the explanation
@@ -914,8 +988,9 @@ LIME FUNCTION ARGUMENTS
 * use_density     If bin_continuous = FALSE should continuous data be sampled using a kernel density 
                 estimation. If not, continuous features are expected to follow a normal distribution.
 
-LIME SETTINGS JUSTIFICATIONS
-NOTE: many of these settings were obtained through trial and error, and/or based on the suggestions provided by LIME and its libraries. Since LIME's results are not always the same, we used the settings that to our opinion generated the most consistent and valid explanations. Of course, we encourage others to try out other settings and experinment further.
+**LIME SETTINGS JUSTIFICATIONS**
+
+NOTE: many of these settings were obtained through trial and error, and/or based on the suggestions provided by LIME and its libraries. Since LIME's results are not always the same, we used the settings that  generated the most consistent and valid explanations during our experinments. Of course, we encourage others to try out other settings and experinment further.
 * Settings for "explainer"
     *  bin_continuous = TRUE --> Makes explanation easier, and having this setting as true helped in obtaining more consistent and reliable results.
     *  quantile_bins = FALSE --> setting this to TRUE generates an error b/c  sameStrand and sameDownStrand don't have enough variance for the algorithm to use quantile bining.  
@@ -930,8 +1005,11 @@ NOTE: many of these settings were obtained through trial and error, and/or based
     *  Side Note: We tried a couple of runs of the script with euclidean distance, but it didn't seem to have much of an impact. Additionally, the different types of settings, such as different gower powers, kernel widths, and distance functions, that can be tweaked in LIME means that a 100% thorough analysis of every possibility may be nearly impossible. For this reason, we tried to stick to the default settings as offered by LIME. 
 
 
-### 14. LIME PRE-SETUP
+## 14. LIME PRE-SETUP
+### 14.1 LIME compatability function
 The original model was built using the randomForest library found in CRAN. However, even though LIME is supposed to be model agnostic, it's current R implementation only supports certain models out of the box. To extend support of the LIME library to other models, the following functions need to be defined for each  unsupported model type. 
+
+```{r}
 model_type.randomForest <- function(x,...) 'classification'
 
 predict_model.randomForest <- function(x, newdata, type, ...) {
@@ -942,10 +1020,12 @@ predict_model.randomForest <- function(x, newdata, type, ...) {
     prob = as.data.frame(res, check.names = F) 
   )
 }
+```
 
-## Data to Explain
-sampleData, sampleData_scaled, and sampleData_norm all contain the same feature, and hence, we should be getting similar explanations in all of our results. We also repeat the same sample 4 times, with purpose of seeing how LIME behaves and making sure LIME's explanations are consistent and valid. 
+### 14.2 Data to Explain
+*sampleData, sampleData_scaled,* and *sampleData_norm* all contain the same features, and hence, we should be getting similar explanations in all of our results. We also apply LIME to the same instance 4 times, with the purpose of testing the validity and consistency of LIME's explanations. 
 
+```{r}
 sampleData <- slt2data[1,]  # A true sample
 sampleData[c(2:4),] <- slt2data[1,]
 sampleData[5,] <- slt2data[1986,] # A false sample
@@ -963,24 +1043,32 @@ sampleData_norm[c(2:4),] <- slt2data_norm[1,]
 sampleData_norm[5,] <- slt2data_norm[1986,] 
 sampleData_norm[c(6:8),] <- slt2data_norm[1986,]
 sampleData_norm
+```
 
-# 15. LIME with RandomForest Library
+## 15. LIME with RandomForest Library
 ### 15.1 In original Model as is
+While on occassion all results may look similar, we recommend running this particular section a few times, and you will notice significant changes, like features that may support the explanation in one plot, but contradict it in the next. 
+```{r}
 predict(origRF, sampleData[c(1,5),-c(8:9)], type = "prob")
 lime_explainer_orig <- lime(as.data.frame(trainData[,c(1:7)]), origRF,
                             bin_continuous = TRUE, quantile_bins=FALSE, use_density = TRUE)
-lime_explanations_orig <- explain(as.data.frame(sampleData[,c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
+lime_explanations_orig <- explain(as.data.frame(sampleData[c(1:4),c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
+plot_features(lime_explanations_orig)
+lime_explanations_orig <- explain(as.data.frame(sampleData[c(5:8),c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
+plot_features(lime_explanations_orig)
 
-plot1 <- plot_features(lime_explanations_orig)
-plot1
+```
 
 ### 15.2 In original scaled Model
 
+```{r}
 predict(origRF_scaled, sampleData_scaled[c(1,5),-c(8:9)], type = "prob")
+
 lime_explainer_orig_scaled <- lime(as.data.frame(trainData_scaled[, c(1:7)]), origRF_scaled,
                                    bin_continuous = TRUE, quantile_bins=FALSE, 
                                    use_density = FALSE, n_bins = 10)
 norm_dist <- as.data.frame(lime_explainer_orig_scaled$bin_cuts)
+
 lime_explainer_orig_scaled <- lime(as.data.frame(trainData_scaled[, c(1:7)]), origRF_scaled,
                                    bin_continuous = TRUE, quantile_bins=FALSE, 
                                    use_density = TRUE, n_bins = 10)
@@ -994,79 +1082,154 @@ cor(norm_dist[,"Distance"],not_norm_dist[,"Distance"])
 cor(norm_dist[,"sameStrand"],not_norm_dist[,"sameStrand"])
 cor(norm_dist[,"DownDistance"],not_norm_dist[,"DownDistance"])
 cor(norm_dist[,"sameDownStrand"],not_norm_dist[,"sameDownStrand"])
-lime_explanations_orig_scaled <- explain(as.data.frame(sampleData_scaled[,c(1:7)]), 
+
+lime_explainer_orig_scaled$bin_cuts # All the features seem to be evenly split into 10, ie, a density is not used for the bin splitting.  
+
+lime_explanations_orig_scaled <- explain(as.data.frame(sampleData_scaled[c(1:4),c(1:7)]), 
                                          lime_explainer_orig_scaled, n_labels = 1, 
                                          n_features = 7, n_permutations = 2000
                                          )
-
-plot2 <- plot_features(lime_explanations_orig_scaled)
-plot2
-  
-### 15.3 In original normalized Model
-
-predict(origRF_scaled, sampleData_scaled[c(1,5),-c(8:9)], type = "prob")
-lime_explanations_orig_scaled <- explain(as.data.frame(sampleData_scaled[,c(1:7)]), 
-                                         lime_explainer_orig_scaled, n_labels = 1, 
-                                         n_features = 7, n_permutations = 2000, 
-                                         #dist_fun = "euclidean", kernel_width = 5
-                                         dist_fun = "gower")
 plot_features(lime_explanations_orig_scaled)
 
+lime_explanations_orig_scaled <- explain(as.data.frame(sampleData_scaled[c(5:8),c(1:7)]), 
+                                         lime_explainer_orig_scaled, n_labels = 1, 
+                                         n_features = 7, n_permutations = 2000
+                                         )
+plot_features(lime_explanations_orig_scaled)
+
+```
+  
+### 15.3 In original normalized Model
+```{r}
+predict(origRF_norm, sampleData_norm[c(1,5),-c(8:9)], type = "prob")
+lime_explainer_orig_norm <- lime(as.data.frame(trainData_norm[, c(1:7)]), origRF_norm,
+                                   bin_continuous = TRUE, quantile_bins=FALSE, 
+                                   use_density = TRUE, n_bins = 10)
+
+lime_explainer_orig_norm$bin_cuts # all bins are split evenly, from 0 to 1, in increments of 0.1, as would be expected
+
+lime_explanations_orig_norm <- explain(as.data.frame(sampleData_norm[c(1:4),c(1:7)]), 
+                                         lime_explainer_orig_norm, n_labels = 1, 
+                                         n_features = 7, n_permutations = 2000
+                                         )
+
+plot_features(lime_explanations_orig_norm)
+
+lime_explanations_orig_norm <- explain(as.data.frame(sampleData_norm[c(5:8),c(1:7)]), 
+                                         lime_explainer_orig_norm, n_labels = 1, 
+                                         n_features = 7, n_permutations = 2000
+                                         )
+plot_features(lime_explanations_orig_norm)
+
+
+
+```
+
 ## 16. LIME in Orig RF Conclusions
-We tried applying LIME to the Orig RF(in part 15) hoping it would work like a plug-and-play application. To our surprise, you can't get LIME to properly work with the "Original" RF model because you must normalize, or scale the data. Since LIME randomizes the permutation points, based on our experinments it seems that LIME is using its own randomization algorith (ie. we couldn't set a seed with the standard R libraries), and hence, the exact results we obtained in this area may not be completely repeatable. However, for the particular case in part 15, that may be irrelevant as the point we are trying to prove here is that LIME's explanations when the data is not scaled or normalized are inconsistent, and hence cannot be trusted.  The top 4 plots should be identical to each other, and the bottom 4 plots should also be identical to each other. However, there's usually at least 1 plot that ranks the feature contributions differently, or that may have a feature "Supporting" in one plot, but "Contradicting" in the next. Due to LIME's nature, obtaining slightly different results was expected, but not to a degree that would make the explanation invalid.  
+
+We tried applying LIME to the Orig RF(in part 15) hoping it would work like a plug-and-play application. 
+To our surprise, you can't get LIME to properly work with the "Original" RF model because you must normalize, or scale the data. 
+LIME generates random permutations to the features in order to create a linear model, but if the features have different scales and values, it is plausible that features with higher scales will simply outweight the other features, even if they're significantly less important, and hence create skewed models and explanations.
+To test this hypothesis, we created a GLM model and reviewed its R^2 value, which was suprisingly low, and hence, finished convincing us that the linear models generated by LIME with the OrigRF were inadequate. 
+Additionally, since LIME randomizes the permutation points, based on our experinments, it seems that LIME is using its own randomization algorith (ie. we couldn't set a seed for it), and hence, the exact results we obtained with the OrigRF may not be completely repeatable. However, for the particular case in part 15, that may be irrelevant as the point we are trying to prove there is that LIME's explanations when the data is not scaled or normalized are inconsistent, and hence cannot be trusted.  
+For each LIME explanation plot, since we're having LIME explain the same instance, all 4 plots should be identical to each other. 
+However, with the OrigRF model, there's usually at least 1 plot that ranks the feature contributions differently, or that may have a feature "Supporting" in one plot, but "Contradicting" in the next. 
+Due to LIME's nature, obtaining slightly different results was expected, but not to a degree that would make the explanations invalid.  
 
 By scaling, or normalizing, the data, we were able to obtain more consistent results (ie. features that support or contradict a prediction, behave the same in all the corresponding 4 plots, although their importance ranking may be different), and in most cases, the rankings of feature contributions as plotted by LIME actually remained the same. 
+LIME behaves properly if the data is scaled and normalized.
+
+An additional interesting take-away, is that sameStrand and sameDownStrand are considered the least important features, and seem to become completely irrelevant for predictions where the instance is FALSE as LIME simply exclude this feature . 
 
 
 ## 17. LIME for the H2O RF models
 
-Initial struggles with getting LIME set up with the original random forest lead us to believe that since RandomForest wasn't a support method by default in the Lime Library, that maybe using a supported method would help us overcome these problems. During our investigation, we discovered that H2O offered additional IM methods (PDPs and SHAP), and that their algorithms were natively supported by the Lime library. Thinking we could kill 3 birds (test 3 IMs) with one stone(one package), we proceeded to create the equivalent proxy model in H2O and run tests with it. The H2O models were actually created prior to our normalized and scaled data tests, as we hadn't realized LIMEs problems with our data at the time. 
-
+Initial struggles with getting LIME set up with the original random forest lead us to believe that since RandomForest wasn't a supported method by default in the Lime Library, that maybe using a supported method would help us overcome these problems. 
+During our investigation, we discovered that H2O offered additional IMs (PDPs and SHAP), and that their algorithms were natively supported by the Lime library. 
+Thinking we could kill 3 birds (test 3 IMs) with one stone (one package), we proceeded to create the equivalent proxy models in H2O and run the corresponding test. 
+The H2O RF models was actually created prior to realizing we needed to have normalized and scaled data sets, as this data preprocessing steps are not necessary for random forests. 
+Further investigations and testing allowed us to discover that normalizing and scaling the data allowed LIME to generate reasonable explanations with the OrigRF model.
+Eventually we decided to create 5 models in total, 2 with the original RandomForest library, and 3 with the H2O library. 
+While only the RF model created in 17.1 is useful (we will show this later on), we decided to share the other model's as well.  
 
 ### 17.1 H2O RF Model
+```{r}
 h2o.predict(object = rfh2o, newdata = as.h2o(sampleData[c(1,8),c(1:7)]) )
 lime_explainer_rfh2o <- lime( as.data.frame( trainData[,c(1:7)] ), rfh2o,
                               bin_continuous = TRUE, quantile_bins = FALSE,
                               n_bins = 10
 )
-lime_explanations_rfh2o <- explain( as.data.frame(sampleData[,c(1:7)] ),lime_explainer_rfh2o, 
+lime_explanations_rfh2o <- explain( as.data.frame(sampleData[c(1:4),c(1:7)] ),lime_explainer_rfh2o, 
                                     n_labels = 1,  n_features = 7, 
                                     n_permutations = 2000 )
 plot_features(lime_explanations_rfh2o) 
 
+lime_explanations_rfh2o <- explain( as.data.frame(sampleData[c(5:8),c(1:7)] ),lime_explainer_rfh2o, 
+                                    n_labels = 1,  n_features = 7, 
+                                    n_permutations = 2000 )
+plot_features(lime_explanations_rfh2o) 
+
+```
 
 ### 17.2 In H2O RF scaled Model 
+```{r}
 h2o.predict(object = rfh2o_scaled, newdata = as.h2o(sampleData_scaled[c(1,8),c(1:7)]))
 lime_explainer_rfh2o_scaled <- lime( as.data.frame( trainData_scaled[,c(1:7)] ), rfh2o_scaled,
-                              bin_continuous = FALSE, quantile_bins = FALSE) 
-lime_explanations_rfh2o_scaled <- explain( as.data.frame(sampleData_scaled[,c(1:7)]),  
+                              bin_continuous = TRUE, quantile_bins = FALSE) 
+
+lime_explanations_rfh2o_scaled <- explain( as.data.frame(sampleData_scaled[c(1:4),c(1:7)]),  
                                     lime_explainer_rfh2o_scaled, n_labels = 1, 
                                     n_features = 7, n_permutations = 2000, dist_fun = "gower" )
 plot_features(lime_explanations_rfh2o_scaled)
 
+lime_explanations_rfh2o_scaled <- explain( as.data.frame(sampleData_scaled[c(5:8),c(1:7)]),  
+                                    lime_explainer_rfh2o_scaled, n_labels = 1, 
+                                    n_features = 7, n_permutations = 2000, dist_fun = "gower" )
+plot_features(lime_explanations_rfh2o_scaled)
+
+```
 
 ### 17.3 LIME to H2O RF normalized Model 
+```{r}
 h2o.predict(object = rfh2o_norm, newdata = as.h2o(sampleData_norm[c(1,8),c(1:7)]) )
 lime_explainer_rfh2o_norm <- lime( as.data.frame( trainData_norm[,c(1:7)] ), rfh2o_norm,
-                                   bin_continuous = FALSE, quantile_bins = FALSE, use_density = TRUE)
-lime_explanations_rfh2o_norm <- explain( as.data.frame(sampleData_norm[,c(1:7)] ),
+                                   bin_continuous = TRUE, quantile_bins = FALSE, use_density = TRUE)
+
+lime_explanations_rfh2o_norm <- explain( as.data.frame(sampleData_norm[c(1:4),c(1:7)] ),
                                          lime_explainer_rfh2o_norm, n_labels = 1, 
                                          n_features = 7, n_permutations = 2000, dist_fun = "gower" )
 plot_features(lime_explanations_rfh2o_norm)
 
-### 17.4 Applying LIME to GLM Model (BONUS) 
+lime_explanations_rfh2o_norm <- explain( as.data.frame(sampleData_norm[c(5:8),c(1:7)] ),
+                                         lime_explainer_rfh2o_norm, n_labels = 1, 
+                                         n_features = 7, n_permutations = 2000, dist_fun = "gower" )
+plot_features(lime_explanations_rfh2o_norm)
 
+```
+
+### 17.4 Applying LIME to GLM Model (BONUS) 
+```{r}
 lime_explainer_glmh2o <- lime( as.data.frame( trainData[,c(1:7)] ),glmh2o, 
-                               bin_continuous = FALSE, quantile_bins = FALSE, 
+                               bin_continuous = TRUE, quantile_bins = FALSE, 
                                use_density = FALSE, n_bins = 10 )
-lime_explanations_glmh2o <- explain( as.data.frame(sampleData[,c(1:7)] ), lime_explainer_glmh2o,   
+lime_explanations_glmh2o <- explain( as.data.frame(sampleData[c(1:4),c(1:7)] ), lime_explainer_glmh2o,   
                                          n_labels = 1,  n_features = 7, 
                                          n_permutations = 2000, dist_fun = "gower"  )
 plot_features(lime_explanations_glmh2o)
 
+lime_explanations_glmh2o <- explain( as.data.frame(sampleData[c(5:8),c(1:7)] ), lime_explainer_glmh2o,   
+                                         n_labels = 1,  n_features = 7, 
+                                         n_permutations = 2000, dist_fun = "gower"  )
+plot_features(lime_explanations_glmh2o)
+
+```
+
+
 ## LIME CONCLUSIONS 
-#
- A known problem with LIME is that explanations may be inconsistent from one instance to the next, even when the instances are very similar to each. With this in mind, each instance we tested was tested at least 4 times (we manually ran this section over and over again) , and with a high enough number of permutations, we managed to get somewhat consistent results. However, some of the results obtained from  LIME were heavily flawed as sometimes it would yield explanations that contradicted the result. 
+
+A known problem with LIME is that explanations may be inconsistent from one instance to the next, even when the instances are very similar to each. 
+With this in mind, each instance we tested was tested at least 4 times (we manually ran this section over and over again) , and with a high enough number of permutations, we managed to get somewhat consistent results. 
+However, some of the results obtained from  LIME were heavily flawed as sometimes it would yield explanations that contradicted the result. 
 For some reason, when explaining false instances, LIME would tend to leave out sameStrand and sameDownStrand from the explanation.
 Additionally, a GLM was also trained to attempt to measure the variance of the data, but the results from the GLM yielded an R^2 value between 0.2 and 0.3, with a max recall of 0.07.
 In other words, the GLM model was only predicting false instances, and since LIME uses linear models for its explanations, based on our observations, it is safe to conclude that LIME was doing the same.
@@ -1081,18 +1244,16 @@ In the explain function, the number of permutations was increased from 10 to 200
 
 # F) SHAP Values 
 
-# 1. something ... 
+```{r}
 SHAP_H2O1 <- h2o.predict_contributions(rfh2o, as.h2o(sampleData[,c(1:7)]))
 head(SHAP_H2O1,10)
-
+```
 
 # G) PDP 
 
-# 1. Generate PDPs for the RF models 
 
-?partialPlot()
-?h2o.partialPlot
-h2o.partialPlot(rfh2o_scaled, data = as.h2o(slt2data_h2o_scaled), cols = "SS", plot=TRUE, nbins=2)
+```{r}
+#h2o.partialPlot(rfh2o_scaled, data = as.h2o(slt2data_h2o_scaled), cols = "SS", plot=TRUE, nbins=2)
 
 h2o.partialPlot(rfh2o, data = as.h2o(ludata_h2o), cols = "SS")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "SS")
@@ -1103,5 +1264,5 @@ h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "Distance")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "DownDistance")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameStrand")
 h2o.partialPlot(rfh2o, data = as.h2o(trainData), cols = "sameDownStrand")
-
+```
 
