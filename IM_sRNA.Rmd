@@ -1,6 +1,8 @@
 ---
 title: "Interpretability Models in the Random Forest sRNA"
-output: html_notebook
+output:
+  html_notebook: default
+  pdf_document: default
 ---
 # Table of Contents
 1. PRE-SETUP = We are simply getting the environment and data ready
@@ -1217,10 +1219,10 @@ An additional interesting take-away, is that sameStrand and sameDownStrand are c
 Initial struggles with getting LIME set up with the original random forest lead us to believe that since RandomForest wasn't a supported method by default in the Lime Library, that maybe using a supported method would help us overcome these problems. 
 During our investigation, we discovered that H2O offered additional IMs (PDPs and SHAP), and that their algorithms were natively supported by the Lime library. 
 Thinking we could kill 3 birds (test 3 IMs) with one stone (one package), we proceeded to create the equivalent proxy models in H2O and run the corresponding test. 
-The H2O RF models was actually created prior to realizing we needed to have normalized and scaled data sets, as this data preprocessing steps are not necessary for random forests. 
+The first H2O RF model was created prior to realizing we needed to have normalized and scaled data sets, as these data preprocessing techniques are normally not necessary for random forests. 
 Further investigations and testing allowed us to discover that normalizing and scaling the data allowed LIME to generate reasonable explanations with the OrigRF model.
 Eventually we decided to create 5 models in total, 2 with the original RandomForest library, and 3 with the H2O library. 
-While only the RF model created in 17.1 is useful (we will show this later on), we decided to share the other model's as well.  
+Even though the performance metrics for the scaled and normalized H2O RF models did not match those of the OrigRF, we decided to still include them in the following sections. 
 
 ### 21.1 H2O RF Model
 ```{r}
