@@ -1,0 +1,283 @@
+#!/usr/bin/env Rscript
+# RFE = Random Forest Explainer
+# OrigRF/Orig RF = Original random forest as found in https://github.com/BioinformaticsLabAtMUN/sRNARanking
+
+# 1. Clear console and environment ----
+
+clc <- function() cat("\014") ; clc()
+remove(list = ls())
+
+# 2. Install and load libraries ----
+# uncomment the following lines if you need to install the libraries
+# install.packages("ROCR")
+# install.packages("PRROC")
+# install.packages("randomForest")
+# install.packages("randomForestExplainer")
+# install.packages("ggplot2")
+library("randomForestExplainer")  # ML interpretation
+library("ROCR")         # ML evaluation
+library("PRROC")        # ML evaluation
+library("randomForest") # ML model building
+library("ggplot2")      # Plotting
+# 3. Load and preprocess data ----
+
+dataSetTrain <- read.csv("./DataSets/combinedData.csv", header = TRUE)
+#dataSetTrain[,"Class"] <- as.logical(dataSetTrain[,"Class"]) # helps guarantee that our model trains the random forest (RF) as a classification tree and not a regression tree
+dataSetTrainX <- dataSetTrain[,-(8:9)] 
+dataSetTrainY <- dataSetTrain[,(8:9)]  
+
+# 4. Load RF models ----
+
+# The original article, titled "Prioritizing bona fide bacterial small RNAs with machine learning 
+# classifiers", and the source materials(training data, testing data, R scripts, .rds file, etc.) 
+# can all be found in PeerJ under the following url: https://peerj.com/articles/6304/
+# The original .rds file can be found in github under the following link:
+# https://github.com/BioinformaticsLabAtMUN/sRNARanking
+
+set.seed(1234)
+tuneRF(dataSetTrain[,c(1:7)], y = factor(dataSetTrain[,9]), ntreeTry = 400, mtryStart = 2) 
+#origRF_rds <- readRDS("RF_classifier4sRNA.rds") # The original RF model doesn't have a "formula" defined within its functions/variables, and therefore, some of the functionality offered by the library is missing. 
+
+dataSetFull <- dataSetTrain[,-8]
+dataSetFull$Class <- as.factor(dataSetTrain$Class)
+str(dataSetFull)
+head(dataSetFull,2)
+origRF <- randomForest( formula = Class ~.,
+                        data = dataSetFull, 
+                        mtry = 2, ntree = 400, importance = TRUE, 
+                        localImp = TRUE # This setting technically overwrites the importance setting set before, but it is needed for RFE to work. Otherwise, It won't be able to analyze the RF
+                       )
+#importance(origRF) # importance as provided the RF library (Is actually used by RFE)
+
+head(dataSetFull,3)
+dataSetFull[6,-8]
+predict(origRF, dataSetFull[6,-8], "prob")
+?predict
+head(dataSetTrain,3)
+
+# 5.RandomForest Explainer ----
+# https://modeloriented.github.io/randomForestExplainer/articles/randomForestExplainer.html
+
+### Feature Explanations
+## "SS" = the free energy of the predicted secondary structure of the sRNA - mostly negative values
+## "Pos10wrtsRNAStart" = distance to their closest predicted promoter site
+## "DistTerm" = distance to their closest predicted Rho-independent terminator 
+## "Distance", = distance to the closest reading frame on the LEFT("upstream") side
+## "sameStrand" = boolean, if transcription is going in the same direction as the ORF(Left Open Reading Frame)
+#                  --> ORF = genomic sequence that's supposed to code for a protein
+## "DownDistance"  = distance to the closest reading frame on the RIGHT("downstream") side
+## "sameDownStrand" =  boolean, if transcription is going in the same direction as the RORF(Right Open Reading Frame)
+ 
+
+# 6. Obtain the distribution of minimal depth ----
+#  * Note that the depth of a tree is equal to the length of the longest path from root to leave in this tree. This equals the maximum depth of a variable in this tree plus one, as leaves are by definition not split by any variable.
+min_depth_frame_origRF <- min_depth_distribution(origRF) # Obtain the distribution of minimal depth
+min_depth_frame_origRF[min_depth_frame_origRF$tree == 10,] # preview the min depth distribution of any of the trees in the RF. Since we have 400 trees, any number between 0 and 400 could be used.
+
+#?min_depth_distribution() # Get minimal depth values for all trees in a random forest
+#plot_min_depth_distribution(origRF, mean_sample = "all_trees") # Same as plotting the min depth frame, but slower
+
+png("./Results/rfe_min_depth_distribution.png", width = 1920, height = 1080, res = 300)
+plot_min_depth_distribution(min_depth_frame_origRF, 
+                            mean_sample = "all_trees" # "relevant_trees", "all_trees", or "top_trees"
+                            #mean_scale = TRUE # False by default
+                            )
+dev.off()
+
+
+# * min depth in this package means what is the first time this variable is used to split the tree
+# * There is an inverse relationship between times_a_root and mean_min_depth 
+
+
+# 2. Variable Importance Measures ----
+## Identify important variables
+# measure_importance(origRF) is equivalent to graph generated by varImpPlot(origRF)
+importance_frame_origRF <- measure_importance(origRF) # calculates all the importance variables for each of the features in our RF
+importance_frame_origRF
+importance_frame_origRF[order(-importance_frame_origRF$accuracy_decrease), c("variable","accuracy_decrease")] 
+importance_frame_origRF[order(-importance_frame_origRF$gini_decrease), c("variable","gini_decrease")] 
+importance_frame_origRF[order(-importance_frame_origRF$times_a_root), c("variable","times_a_root")]
+importance_frame_origRF[order(-importance_frame_origRF$p_value),] # a low p-value means that the feature is important for the prediction. 
+write.csv(importance_frame_origRF, "./Results/RFE_importance_frame_origRF.csv", row.names = FALSE, col.names = TRUE)
+
+# While Distance and DownDistance seem to be the most important variables, SS and Pos10wrtsRNAStart have the lowest p-values.
+# p_value tells us whether the observed number of successes (number of nodes in which Xj was used for splitting) exceeds the theoretical number of successes if they were random
+
+#   sameDownStrand and sameStrand have very little importance in the model
+#   measure_importance() in the RF Explainer package = importance() and varImpPlot(), already included in the RF package. RF Explainer package just seems to present things prettier
+
+
+# 3. Multi-Way Importance Plots ----
+# plot_multi_way_importance(origRF, size_measure = "no_of_nodes") # gives the same result as below but takes longer
+# Better presents the results from "importance_frame_origRF <- measure_importance(origRF)"
+
+png("./Results/rfe_multiway_imp_plot_1.png", width = 1920, height = 1080, res = 300)
+plot_multi_way_importance(importance_frame_origRF, size_measure = "no_of_nodes") # x = mean_min_depth, y = times_a_root
+dev.off()
+
+png("./Results/rfe_multiway_imp_plot_2.png", width = 1920, height = 1080, res = 200)
+plot_multi_way_importance(importance_frame_origRF, x_measure = "gini_decrease",  y_measure = "accuracy_decrease", 
+                          size_measure = "times_a_root"
+                          # SS and Pos10wrtsRNAStart are insignificant according to the P-Value
+                          )
+dev.off()
+
+# 4. Measure Comparison using ggpairs  ----
+## The diagonal are density plots ("advanced versions of histograms")
+# plot_importance_ggpairs(origRF) # gives the same result as below but takes longer
+
+png("./Results/rfe_imp_ggpairs_full.png", width = 1920, height = 1080, res = 200)
+plot_importance_ggpairs(importance_frame_origRF)
+dev.off()
+
+png("./Results/rfe_imp_ggpairs_main_pairs.png", width = 1920, height = 1080, res = 200)
+plot_importance_ggpairs(importance_frame_origRF, measures = c("gini_decrease","accuracy_decrease", "times_a_root"))
+dev.off()
+
+# plot_importance_rankings(origRF) # gives the same result as below but takes longer
+png("./Results/rfe_imp_rankings.png", width = 1920, height = 1080, res = 200)
+plot_importance_rankings(importance_frame_origRF)
+dev.off()
+
+## Plot Interactions
+# (vars <- important_variables(origRF, k = 5, measures = c("mean_min_depth", "no_of_trees"))) # gives the same result as below but takes longer
+imp_vars <- important_variables(importance_frame_origRF, k = 7, measures = c("mean_min_depth", "gini_decrease"))
+imp_vars
+
+interactions_frame_origRF <- min_depth_interactions(
+      forest = origRF,
+      vars = imp_vars,
+      mean_sample = "top_trees",
+      uncond_mean_sample = "top_trees")
+plot_min_depth_interactions(interactions_frame_origRF) 
+# Top 5 with top_trees = DownDistance:SS, Distance:SS, DownDistance:Pos10..., DistTerm:SS, Distance:Pos10...
+
+interactions_frame_origRF_2 <- min_depth_interactions(
+      forest = origRF,
+      vars = imp_vars,
+      mean_sample = "relevant_trees",
+      uncond_mean_sample = "relevant_trees")
+plot_min_depth_interactions(interactions_frame_origRF_2)
+# Top 5 with relevant_trees =  DownDistance:SS, Distance:SS, DownDistance:Pos10..., DistTerm:SS, Distance:Pos10...
+
+interactions_frame_origRF_3 <- min_depth_interactions(
+      forest = origRF,
+      vars = imp_vars,
+      mean_sample = "all_trees",
+      uncond_mean_sample = "all_trees")
+png("./Results/rfe_min_depth_interactions.png", width = 1920, height = 1080, res = 100)
+plot_min_depth_interactions(interactions_frame_origRF_3)
+dev.off()
+# Top 5 with relevant_trees =  DownDistance:SS, Distance:SS, DownDistance:Pos10..., DistTerm:SS, Distance:Pos10...
+# While the three graphs are different, the overall ranking seems to be the same
+
+
+# 5. Plot Feature Interactions ----
+
+str(dataSetTrainX)
+dataSetTrainX$Distance <- as.numeric(dataSetTrainX$Distance)
+
+# Feature Interactions for top 5 
+png("./Results/rfe_DownDistance_vs_SS.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "SS", grid = 1000) 
+# The higher(closer to 0) the SS, the higher the confidence in the prediction
+dev.off()
+
+png("./Results/rfe_Distance_vs_SS.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "SS", grid = 300) + geom_hline(yintercept = -10, linetype="longdash") + geom_vline(xintercept = -850, linetype="longdash")
+# distances greater than -1000 => higher chances of having a bona fide sRNA
+# SS higher than -10 => Lower the prob of having a bona fide sRNA
+dev.off()
+
+png("./Results/rfe_DownDistance_vs_Pos10wrtsRNAStart.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "Pos10wrtsRNAStart", grid = 300) 
+# No disernable takeaway
+dev.off()
+
+png("./Results/rfe_DistTerm_vs_SS.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "DistTerm", "SS", grid = 300)  + geom_hline(yintercept = -10, linetype="longdash", lwd = 2)
+# SS of 0 seems to virtually guarantee that we don't have a bona fide sRNA
+dev.off()
+
+png("./Results/rfe_Distance_vs_Pos10wrtsRNAStart.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "Pos10wrtsRNAStart", grid = 1000) 
+# Having a Pos10wrtsRNAStart near 0 or slightly lower seems to make predictions fuzzy (near 0.5)
+dev.off()
+
+# Interaction between the top 2 most important features
+png("./Results/rfe_Distance_vs_DownDistance.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "DownDistance", grid = 300) 
+# These are the 2 top features, but their interactions are not among the top ones
+# When both features are close to 0, the chances of having a bona fide sRNA greatly increase
+dev.off()
+
+# Based on the previous plots, generating the following plots seem like a smart thing to do
+png("./Results/rfe_DownDistance_vs_DistTerm.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "DistTerm", grid = 300)+ geom_hline(yintercept = 50, linetype="longdash")
+# having a DistTerm less than 50, or close to 0, increases the chances of having a bona fide sRNA
+dev.off()
+
+png("./Results/rfe_Distance_vs_DistTerm.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "DistTerm", grid = 300) + geom_hline(yintercept = 50, linetype="longdash") + geom_vline(xintercept = -850, linetype="longdash")
+# having a Distance close to 0 increases the chances of having a bona fide sRNA
+dev.off()
+
+png("./Results/rfe_sameStrand_vs_sameDownStrand.png", width = 1920, height = 1080, res = 100)
+plot_predict_interaction(origRF, dataSetTrainX, "sameStrand", "sameDownStrand", grid = 300)
+# sameStrand and sameDownStrand were considered the least relevant/important features. However, the overall tone of the graph suggests that having these variables helps boosting the model's confidence in any given prediction. (ie. compare the tones of the previous graph to this one, and it's the model has more "confidence" with its overall decisions in this graph.)
+dev.off()
+
+#plot_predict_interaction(origRF, dataSetTrainX, "sameStrand", "sameDownStrand", grid = 100) # least important variables, and no disernable takeaways can be generated from here
+
+explain_forest(origRF, data = dataSetTrain[,c(1:7)], interactions = TRUE)
+
+# 6. BONUS: PDP vs. RFE ----
+
+# install.packages("pdp")
+library(pdp)
+
+pdf("./Results/pdp_vs_rfe.pdf")
+plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "SS", grid = 1000) 
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "SS", grid = 300) + geom_hline(yintercept = -10, linetype="longdash") + geom_vline(xintercept = -850, linetype="longdash")
+partial(origRF, ... = c("prob"), pred.var = c("Distance","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+
+plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "Pos10wrtsRNAStart", grid = 300) 
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance","Pos10wrtsRNAStart"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+plot_predict_interaction(origRF, dataSetTrainX, "DistTerm", "SS", grid = 300)  + geom_hline(yintercept = -10, linetype="longdash", lwd = 2)
+partial(origRF, ... = c("prob"), pred.var = c("DistTerm","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "Pos10wrtsRNAStart", grid = 1000) 
+partial(origRF, ... = c("prob"), pred.var = c("Distance","Pos10wrtsRNAStart"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "DownDistance", grid = 300) 
+partial(origRF, ... = c("prob"), pred.var = c("Distance","DownDistance"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "DistTerm", grid = 300)+ geom_hline(yintercept = 50, linetype="longdash")
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance","DistTerm"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+plot_predict_interaction(origRF, dataSetTrainX, "Distance", "DistTerm", grid = 300) + geom_hline(yintercept = 50, linetype="longdash") + 
+partial(origRF, ... = c("prob"), pred.var = c("Distance","DistTerm"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+plot_predict_interaction(origRF, dataSetTrainX, "sameStrand", "sameDownStrand", grid = 300)
+partial(origRF, ... = c("prob"), pred.var = c("sameStrand","sameDownStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+
+dev.off()
+
+# 7. BONUS: PDP with single features ----
+
+pdf("./Results/pdp_individual_features.pdf")
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+partial(origRF, ... = c("prob"), pred.var = c("Distance"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+partial(origRF, ... = c("prob"), pred.var = c("DistTerm"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+partial(origRF, ... = c("prob"), pred.var = c("SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+partial(origRF, ... = c("prob"), pred.var = c("Pos10wrtsRNAStart"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+partial(origRF, ... = c("prob"), pred.var = c("sameStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+partial(origRF, ... = c("prob"), pred.var = c("sameDownStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+# This is a PDP with 3 features, but it's hard to understand what it means, and it takes a really long time to compute
+# partial(origRF, ... = c("prob"), pred.var = c("Distance","DownDistance", "SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
