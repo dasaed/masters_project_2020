@@ -52,7 +52,6 @@ origRF <- randomForest( formula = Class ~.,
 head(dataSetFull,3)
 dataSetFull[6,-8]
 predict(origRF, dataSetFull[6,-8], "prob")
-?predict
 head(dataSetTrain,3)
 
 # 5.RandomForest Explainer ----
@@ -236,13 +235,12 @@ explain_forest(origRF, data = dataSetTrain[,c(1:7)], interactions = TRUE)
 # install.packages("pdp")
 library(pdp)
 
-pdf("./Results/pdp_vs_rfe.pdf")
+pdf("./Results/pdp_vs_rfe.pdf") ## Save the comparisons as a PDF File
 plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "SS", grid = 1000) 
 partial(origRF, ... = c("prob"), pred.var = c("DownDistance","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
 
 plot_predict_interaction(origRF, dataSetTrainX, "Distance", "SS", grid = 300) + geom_hline(yintercept = -10, linetype="longdash") + geom_vline(xintercept = -850, linetype="longdash")
 partial(origRF, ... = c("prob"), pred.var = c("Distance","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
-
 
 plot_predict_interaction(origRF, dataSetTrainX, "DownDistance", "Pos10wrtsRNAStart", grid = 300) 
 partial(origRF, ... = c("prob"), pred.var = c("DownDistance","Pos10wrtsRNAStart"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
@@ -267,6 +265,46 @@ partial(origRF, ... = c("prob"), pred.var = c("sameStrand","sameDownStrand"), ty
 
 dev.off()
 
+# Save the PDPs from the PDP Library as individual png files
+
+png("./Results/pdp_DownDistance_vs_SS.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_Distance_vs_SS.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("Distance","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_DownDistance_vs_Pos10wrtsRNAStart.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance","Pos10wrtsRNAStart"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_DistTerm_vs_SS.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("DistTerm","SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_Distance_vs_Pos10wrtsRNAStart.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("Distance","Pos10wrtsRNAStart"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_Distance_vs_DownDistance.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("Distance","DownDistance"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_DownDistance_vs_DistTerm.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance","DistTerm"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_Distance_vs_DistTerm.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("Distance","DistTerm"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_sameStrand_vs_sameDownStrand.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("sameStrand","sameDownStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+
+
 # 7. BONUS: PDP with single features ----
 
 pdf("./Results/pdp_individual_features.pdf")
@@ -278,6 +316,36 @@ partial(origRF, ... = c("prob"), pred.var = c("Pos10wrtsRNAStart"), type = "clas
 partial(origRF, ... = c("prob"), pred.var = c("sameStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
 partial(origRF, ... = c("prob"), pred.var = c("sameDownStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
 dev.off()
+
+png("./Results/pdp_DownDistance.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("DownDistance"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_Distance.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("Distance"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_DistTerm.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("DistTerm"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_SS.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_Pos10wrtsRNAStart.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("Pos10wrtsRNAStart"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_sameStrand.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("sameStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+png("./Results/pdp_sameDownStrand.png", width = 1920, height = 1080, res = 100)
+partial(origRF, ... = c("prob"), pred.var = c("sameDownStrand"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)
+dev.off()
+
+
 
 # This is a PDP with 3 features, but it's hard to understand what it means, and it takes a really long time to compute
 # partial(origRF, ... = c("prob"), pred.var = c("Distance","DownDistance", "SS"), type = "classification", prob = TRUE, which.class = "1", plot = TRUE)

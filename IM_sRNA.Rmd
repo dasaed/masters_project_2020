@@ -86,6 +86,7 @@ library("randomForest") # ML model building
 library("randomForestExplainer") # ML Global interpretation
 library("lime")         # ML local interpretation
 library("png")
+
 ```
 
 ## 3. Load and preprocess the data 
@@ -294,7 +295,7 @@ The original *.rds* file can also be downloaded from [github](https://github.com
 We can either retrain the original model, or load the .rds file provided in the original article. For the purpose of saving time, we simply loaded the model.
 
 ```{r}
-origRF <- readRDS("RF_classifier4sRNA.rds")
+origRF <- readRDS("./RFModels/RF_classifier4sRNA.rds")
 ```
 
 ### 4.2 Retrain new models with Scaled and Normalized Data 
@@ -304,7 +305,12 @@ Since some of the IM models required scaling or normalized data to properly func
 tuneRF(dataSetTrainX[,c(1:7)], y = factor(dataSetTrainY[,2]), ntreeTry = 400, mtryStart = 2)
 set.seed(1234)
 origRF_scaled <- randomForest(x = dataSetTrain_scaled[,c(1:7)], y = factor(dataSetTrainY[,2]), mtry = 2, ntree = 400, importance = TRUE)
+saveRDS(origRF_scaled, "./RFModels/origRF_scaled.rds")
+
 origRF_norm <- randomForest(x = dataSetTrain_norm[,c(1:7)], y = factor(dataSetTrainY[,2]), mtry = 2, ntree = 400, importance = TRUE)
+saveRDS(origRF_norm, "./RFModels/origRF_norm.rds")
+
+
 ```
 
 # II) TRAIN THE NEW H2O MODEL 
@@ -401,7 +407,7 @@ rfh2o_training_peformance
 ```
 
 
-# III) COMPARE MODEL'S PREDICTIONS
+# III) MODELS' PREDICTIONS COMPARISONS
 In this section we'll get the predictions all the models generate on the testing data LU and SLT2. The goal of this section is not to prove which model is the best, but to prove that the models are similar enough to the point that the analysis of the H2O model will be a valid analogy model for the original RF model. 
 
 ## 8. Get Testing Data Predictions from the Models
@@ -562,6 +568,22 @@ nrow( slt2_predictions[slt2_predictions$origVsH2ONorm == "BOTH_WRONG",] )
 nrow( slt2_predictions[slt2_predictions$origVsH2ONorm == "BOTH_RIGHT",] )
 ```
 
+### 10.3 SLT2 Data for the IMs
+There are nearly 5000 potential test samples to analyze with any of the given local interpretability models. Since analyzing all of these values would go beyond our time restrictions, we narrowed down the analysis to only the false negative cases. Since it is expected that most potential sRNA samples will not be sRNA, looking for potential ways to increase the true positive rate of the model seemed like the best way to select which instances to analyze. 
+
+```{r}
+# Obtain all the instances that were classified as false negatives and save them to a data frame so that they can be later used by the local IM's for further analysis
+slt2_predictions
+slt2_im_data_fn <- slt2_predictions[slt2_predictions$Class == 1 & slt2_predictions$origPreds == 0,]
+slt2_im_data_fp <- slt2_predictions[slt2_predictions$Class == 0 & slt2_predictions$origPreds == 1,]
+slt2_im_data <- rbind(
+  head( slt2_im_data_fn[ order( slt2_im_data_fn$OrigRF_P ), ], 10 ),
+  tail( slt2_im_data_fp[ order( slt2_im_data_fp$OrigRF_P ), ], 10 )
+)
+slt2_im_data
+
+```
+
 ## 11. LU Comparisons 
 ### 11.1 Build LU Predictions table 
 
@@ -674,7 +696,148 @@ nrow( lu_predictions[lu_predictions$origVsH2ONorm == "BOTH_WRONG",] )
 nrow( lu_predictions[lu_predictions$origVsH2ONorm == "BOTH_RIGHT",] )
 ```
 
-# IV) COMPARE MODEL'S METRICS 
+
+### 11.3 LU Data for the IMs
+
+
+```{r}
+# Obtain all the instances that were classified as false negatives and false positives and save them to a data frame so that they can be later used by the local IM's for further analysis
+lu_predictions
+lu_im_data_fn <- lu_predictions[ lu_predictions$Class == 1 & lu_predictions$origPreds == 0, ]
+lu_im_data_fp <- lu_predictions[ lu_predictions$Class == 0 & lu_predictions$origPreds == 1, ]
+lu_im_data <- rbind(
+  head( lu_im_data_fn[ order( lu_im_data_fn$OrigRF_P ), ], 10 ),
+  tail( lu_im_data_fp[ order( lu_im_data_fp$OrigRF_P ), ], 10 )
+)
+lu_im_data
+
+```
+
+
+## 12. Other Potential Outliers - For Future Studies or Projects
+
+
+### 12.2 SLT2 Data Outliers
+
+```{r}
+
+slt2data_max_SS      <- max(slt2data[,"SS"])
+cbind(slt2data_max_SS, trainData_max_SS)
+nrow(slt2data[slt2data$SS > trainData_max_SS,])
+
+slt2data_min_SS      <- min(slt2data[,"SS"])
+cbind(slt2data_min_SS, trainData_min_SS)
+nrow(slt2data[slt2data$SS < trainData_min_SS,])
+
+# ====================================================== #
+
+slt2data_max_Pos     <- max(slt2data[,"Pos10wrtsRNAStart"])
+cbind(slt2data_max_Pos, trainData_max_Pos)
+nrow(slt2data[slt2data$Pos10wrtsRNAStart > trainData_max_Pos,])
+
+slt2data_min_Pos     <- min(slt2data[,"Pos10wrtsRNAStart"])
+cbind(slt2data_min_Pos, trainData_min_Pos) # Both Mins are the same
+
+# ====================================================== #
+
+slt2data_max_DisTerm <- max(slt2data[,"DistTerm"])
+cbind(slt2data_max_DisTerm, trainData_max_DisTerm) # Both Max are the same
+
+slt2data_min_DisTerm <- min(slt2data[,"DistTerm"])
+cbind(slt2data_min_DisTerm, trainData_min_DisTerm)
+nrow(slt2data[slt2data$DistTerm < trainData_min_DisTerm ,])
+
+# ====================================================== #
+
+slt2data_max_Dis     <- max(slt2data[,"Distance"])
+cbind(slt2data_max_Dis, trainData_max_Dis) # Both Max are the same
+
+slt2data_min_Dis     <- min(slt2data[,"Distance"])
+cbind(slt2data_min_Dis, trainData_min_Dis)
+nrow(slt2data[slt2data$Distance < trainData_min_Dis,])
+
+# ====================================================== #
+slt2data_max_DownDis <- max(slt2data[,"DownDistance"])
+cbind(slt2data_max_DownDis, trainData_max_DownDis)
+nrow(slt2data[slt2data$DownDistance > trainData_max_DownDis,])
+
+slt2data_min_DownDis <- min(slt2data[,"DownDistance"])
+cbind(slt2data_min_DownDis, trainData_min_DownDis) # Both Min are the same
+
+# ====================================================== #
+slt2_outliers <- slt2data[ slt2data$SS < trainData_min_SS | slt2data$SS > trainData_max_SS |  
+                           slt2data$Pos10wrtsRNAStart < trainData_min_Pos | slt2data$Pos10wrtsRNAStart > trainData_max_Pos |
+                           slt2data$DistTerm < trainData_min_DisTerm | slt2data$DistTerm > trainData_max_DisTerm |
+                           slt2data$Distance < trainData_min_Dis | slt2data$Distance > trainData_max_Dis |
+                           slt2data$DownDistance < trainData_min_DownDis | slt2data$DownDistance > trainData_max_DownDis 
+                             ,]
+
+nrow(slt2_outliers)
+
+```
+
+
+
+### 12.2 LU Data Outliers
+
+```{r}
+
+ludata_max_SS      <- max(ludata[,"SS"])
+cbind(ludata_max_SS, trainData_max_SS)
+nrow(ludata[ludata$SS > trainData_max_SS,])
+
+ludata_min_SS      <- min(ludata[,"SS"])
+cbind(ludata_min_SS, trainData_min_SS)
+nrow(ludata[ludata$SS < trainData_min_SS,])
+
+# ====================================================== #
+
+ludata_max_Pos     <- max(ludata[,"Pos10wrtsRNAStart"])
+cbind(ludata_max_Pos, trainData_max_Pos)
+nrow(ludata[ludata$Pos10wrtsRNAStart > trainData_max_Pos,])
+
+ludata_min_Pos     <- min(ludata[,"Pos10wrtsRNAStart"])
+cbind(ludata_min_Pos, trainData_min_Pos) # Both Mins are the same
+
+# ====================================================== #
+
+ludata_max_DisTerm <- max(ludata[,"DistTerm"])
+cbind(ludata_max_DisTerm, trainData_max_DisTerm) # Both Max are the same
+
+ludata_min_DisTerm <- min(ludata[,"DistTerm"])
+cbind(ludata_min_DisTerm, trainData_min_DisTerm)
+nrow(ludata[ludata$DistTerm < trainData_min_DisTerm ,]) # There are 454 samples outside this range!!!
+
+# ====================================================== #
+
+ludata_max_Dis     <- max(ludata[,"Distance"])
+cbind(ludata_max_Dis, trainData_max_Dis) # Both Max are the same
+
+ludata_min_Dis     <- min(ludata[,"Distance"])
+cbind(ludata_min_Dis, trainData_min_Dis)
+nrow(ludata[ludata$Distance < trainData_min_Dis ,])
+
+# ====================================================== #
+ludata_max_DownDis <- max(ludata[,"DownDistance"])
+cbind(ludata_max_DownDis, trainData_max_DownDis)
+nrow(ludata[ludata$DownDistance > trainData_max_DownDis ,])
+
+ludata_min_DownDis <- min(ludata[,"DownDistance"])
+cbind(ludata_min_DownDis, trainData_min_DownDis)
+nrow(ludata[ludata$DownDistance < trainData_min_DownDis ,])
+
+lu_outliers <- ludata[ ludata$SS < trainData_min_SS | ludata$SS > trainData_max_SS |  
+                           ludata$Pos10wrtsRNAStart < trainData_min_Pos | ludata$Pos10wrtsRNAStart > trainData_max_Pos |
+                           ludata$DistTerm < trainData_min_DisTerm | ludata$DistTerm > trainData_max_DisTerm | # trainData_min_DisTerm
+                           ludata$Distance < trainData_min_Dis | ludata$Distance > trainData_max_Dis |
+                           ludata$DownDistance < trainData_min_DownDis | ludata$DownDistance > trainData_max_DownDis 
+                             ,]
+
+nrow(lu_outliers)
+
+```
+
+# IV) MODELS' METRICS COMPARISONS
 
 While sections 11.2 and 10.2 suggest that all the models are behaving similarly, making a judgement solely on accuracy can be deceiving. For this reason, we also decided to dive deeper into the model's performances, and do additional side by side comparison of other performance metrics. 
 
@@ -989,45 +1152,81 @@ The following graphs are simply helpful in identifying feature importance
 ![Top 30 Feature Interactions](./Results/rfe_min_depth_interactions.png) 
 
 From this graph, we gather that the top 5 feature interactions are:
+
   1. DownDistance:SS
   1. Distance:SS
-  1. DownDistance:Pos10wrtsRNAStart, 
-  1. DistTerm:SS, 
+  1. DownDistance:Pos10wrtsRNAStart 
+  1. DistTerm:SS 
   1. Distance:Pos10wrtsRNAStart
-Even though Distance and DownDistance were considered the most important features, their interactions did not appear to be as significant as the others
+  
+Even though the following were not included in the feature interaction graph, we thought they it would be interesting to also have PDPs graphs for the following interactions:
+  * DownDistance:DistTerm
+  * Distance:DistTerm
+  * Distance:DownDistance
+  * sameStrand:sameDownStrand
 
-
+**NOTE**: We used two different libraries (RFE and PDP) to generate the following plots. 
 
 ### 16.2 DownDistance vs. SS
 
+Graph by RFE Library: 
 ![DownDistance vs. SS](./Results/rfe_DownDistance_vs_SS.png)
+
 * The higher(closer to 0) the SS, the higher the confidence in the prediction
+
+Graph by PDP Library: 
+![DownDistance vs. SS](./Results/pdp_DownDistance_vs_SS.png)
 
 ### 16.3 Distance vs. SS
 
+Graph by RFE Library: 
 ![Distance vs. SS](./Results/rfe_Distance_vs_SS.png)
+
+Graph by PDP Library: 
+![Distance vs. SS](./Results/pdp_Distance_vs_SS.png)
+
 * distances greater than -850 => higher chances of having a bona fide sRNA
 * SS higher than -10 => Lower the prob of having a bona fide sRNA
 
 ### 16.4 DownDistance vs. Pos10wrtsRNAStart
 
+Graph by RFE Library: 
 ![DownDistance vs. Pos10wrtsRNAStart](./Results/rfe_DownDistance_vs_Pos10wrtsRNAStart.png) 
+
+Graph by PDP Library: 
+![DownDistance vs. Pos10wrtsRNAStart](./Results/pdp_DownDistance_vs_Pos10wrtsRNAStart.png)  
+
 * No clear disernable takeaway
 
 ### 16.5 DistTerm vs. SS
 
+Graph by RFE Library: 
 ![DistTerm vs. SS](./Results/rfe_DistTerm_vs_SS.png)
+
+Graph by PDP Library: 
+![DistTerm vs. SS](./Results/pdp_DistTerm_vs_SS.png)
+
 * SS of 0 seems to virtually guarantee that we don't have a bona fide sRNA
 
 ### 16.6 Distance vs. Pos10wrtsRNAStart
 
+Graph by RFE Library: 
 ![Distance vs. Pos10wrtsRNAStart](./Results/rfe_Distance_vs_Pos10wrtsRNAStart.png) 
+
+Graph by PDP Library: 
+![Distance vs. Pos10wrtsRNAStart](./Results/pdp_Distance_vs_Pos10wrtsRNAStart.png) 
+
 * Having a Pos10wrtsRNAStart near 0 or slightly lower seems to make predictions fuzzy (near 0.5)
 
 
 ### 16.7 Distance vs. DownDistance
 
+Graph by RFE Library:
 ![Distance vs. DownDistance](./Results/rfe_Distance_vs_DownDistance.png) 
+
+Graph by PDP Library:
+![Distance vs. DownDistance](./Results/pdp_Distance_vs_DownDistance.png) 
+
 * These are the 2 top features, but their interactions are not among the top ones
 * When both features are close to 0, the chances of having a bona fide sRNA greatly increase
 dev.off()
@@ -1035,23 +1234,92 @@ dev.off()
 ### 16.8 DownDistance vs. DistTerm
 
 Based on the previous plots, generating the following plots seem like a smart thing to do
+
+Graph by RFE Library:
 ![DownDistance vs. DistTerm](./Results/rfe_DownDistance_vs_DistTerm.png)
+
+Graph by PDP Library:
+![DownDistance vs. DistTerm](./Results/pdp_DownDistance_vs_DistTerm.png)
+
 * having a DistTerm less than 50, or close to 0, increases the chances of having a bona fide sRNA
 
 ### 16.9 Distance vs. DistTerm
 
+Graph by RFE Library: 
 ![Distance vs. DistTerm](./Results/rfe_Distance_vs_DistTerm.png)
+
+Graph by PDP Library: 
+![Distance vs. DistTerm](./Results/pdp_Distance_vs_DistTerm.png)
 
 * having a Distance close to 0 increases the chances of having a bona fide sRNA
 
 ### 16.10 sameStrand vs sameDownStrand
 
+Graph by RFE Library: 
 ![sameStrand vs sameDownStrand](./Results/rfe_sameStrand_vs_sameDownStrand.png)
+
+Graph by PDP Library: 
+![sameStrand vs sameDownStrand](./Results/pdp_sameStrand_vs_sameDownStrand.png)
 
 * sameStrand and sameDownStrand were considered the least relevant/important features. However, the overall tone of the graph suggests that having these variables helps boosting the model's confidence in any given prediction. (ie. compare the tones of the previous graph to this one, and it's obvious the model has more "confidence" with its overall decisions in this later graph.)
 
+## 17. PDP plots for individual features
+### 17.1 DownDistance PDP Plot
+PDP plot using the PDP R library:
+![PDP plot for ](./Results/pdp_DownDistance.png)
 
-## 17. RFE Conclusions
+
+PDP plot using the H2O Library:
+```{r}
+h2o.partialPlot(object = rfh2o, data = trainData, cols="DownDistance")
+```
+
+
+### 17.2 Distance PDP Plot
+PDP plot using the PDP R library:
+![PDP plot for ](./Results/pdp_Distance.png)
+
+
+PDP plot using the H2O Library:
+```{r}
+h2o.partialPlot(object = rfh2o, data = trainData, cols="Distance")
+```
+
+### 17.3 DistTerm PDP Plot
+PDP plot using the PDP R library:
+![PDP plot for ](./Results/pdp_DistTerm.png)
+
+
+PDP plot using the H2O Library:
+```{r}
+h2o.partialPlot(object = rfh2o, data = trainData, cols="DistTerm")
+```
+
+### 17.4 SS PDP Plot
+PDP plot using the PDP R library:
+![PDP plot for ](./Results/pdp_SS.png)
+
+
+PDP plot using the H2O Library:
+```{r}
+h2o.partialPlot(object = rfh2o, data = trainData, cols="SS")
+```
+
+### 17.5 Pos10wrtsRNAStart PDP Plot
+PDP plot using the PDP R library:
+![PDP plot for ](./Results/pdp_Pos10wrtsRNAStart.png)
+
+
+PDP plot using the H2O Library:
+```{r}
+h2o.partialPlot(object = rfh2o, data = trainData, cols="Pos10wrtsRNAStart")
+```
+
+
+
+
+
+## 18. RFE Conclusions
 
 There are many conclusions that may be gathered or obtained from the plots above, but the main takeaways can be summarized as follows:
   * The  closer the SS is to 0, the higher the model's confidence in its decision
@@ -1118,7 +1386,7 @@ predict_model.randomForest <- function(x, newdata, type, ...) {
 }
 ```
 
-### 18.2 Data to Explain
+### 18.2 Sample Data to Explain
 
 *sampleData, sampleData_scaled,* and *sampleData_norm* all contain the same features, and hence, we should be getting similar explanations in all of our results. We also apply LIME to the same instance 4 times, with the purpose of testing the validity and consistency of LIME's explanations. 
 
@@ -1150,8 +1418,10 @@ While on occassion all results may look similar, we recommend running this parti
 predict(origRF, sampleData[c(1,5),-c(8:9)], type = "prob")
 lime_explainer_orig <- lime(as.data.frame(trainData[,c(1:7)]), origRF,
                             bin_continuous = TRUE, quantile_bins=FALSE, use_density = TRUE)
+
 lime_explanations_orig <- explain(as.data.frame(sampleData[c(1:4),c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
 plot_features(lime_explanations_orig)
+
 lime_explanations_orig <- explain(as.data.frame(sampleData[c(5:8),c(1:7)]), lime_explainer_orig, n_labels = 1, n_features = 7, n_permutations = 2000)
 plot_features(lime_explanations_orig)
 
@@ -1327,10 +1597,63 @@ plot_features(lime_explanations_glmh2o)
 
 ```
 
+## 22. LIME in SLT2 and LU testing samples
 
-## 25. LIME CONCLUSIONS 
+Since we have proven that all of our models using the RandomForest library are similar enough, it is safe to conclude that the explanations from one model are also applicable to the other models. 
+For this reason, we will use the normalized RF model as a proxy for the OrigRF model. 
 
-A known problem with LIME is that explanations may be inconsistent from one instance to the next, even when the instances are very similar to each. 
+```{r}
+
+origRF_norm_slt2_pred_ims <- subset(slt2data_norm, rownames(slt2data_norm) %in% rownames(slt2_im_data) )
+slt2_test_samples <- rbind(slt2_im_data[,c(1:8)], origRF_norm_slt2_pred_ims)
+slt2_test_samples <- slt2_test_samples[order(row.names(slt2_test_samples)),]
+
+
+origRF_norm_lu_pred_ims <- subset(ludata_norm, rownames(ludata_norm) %in% rownames(lu_im_data) )
+lu_test_samples <- rbind(lu_im_data[,c(1:8)], origRF_norm_lu_pred_ims)
+lu_test_samples <- lu_test_samples[order(row.names(lu_test_samples)),]
+
+write.csv(slt2_test_samples, "./DataSets/slt2_data_to_analyze.csv", row.names = TRUE, col.names = TRUE)
+
+write.csv(lu_test_samples,   "./DataSets/lu_data_to_analyze.csv", row.names = TRUE, col.names = TRUE)
+
+lime_explainer_orig_norm <- lime(as.data.frame(trainData_norm[, c(1:7)]), origRF_norm,
+                                   bin_continuous = TRUE, quantile_bins=FALSE, 
+                                   use_density = TRUE, n_bins = 10)
+
+pdf("./Results/lime_slt2_explanations.pdf")
+for( i in 1:nrow(origRF_norm_slt2_pred_ims) ){
+  temp_df <- data.frame(origRF_norm_slt2_pred_ims[i,])
+  temp_df <- temp_df[ rep(seq_len(nrow(temp_df)), each = 4), ]
+  lime_explanations_orig_norm <- explain(as.data.frame(temp_df[,c(1:7)]), 
+                                           lime_explainer_orig_norm, n_labels = 1, 
+                                           n_features = 7, n_permutations = 2000
+                                           )
+  print( plot_features(lime_explanations_orig_norm) )
+
+  } 
+dev.off()
+
+pdf("./Results/lime_lu_explanations.pdf")
+for( i in 1:nrow(origRF_norm_lu_pred_ims) ){
+  temp_df <- data.frame(origRF_norm_lu_pred_ims[i,])
+  temp_df <- temp_df[ rep(seq_len(nrow(temp_df)), each = 4), ]
+  lime_explanations_orig_norm <- explain(as.data.frame(temp_df[,c(1:7)]), 
+                                           lime_explainer_orig_norm, n_labels = 1, 
+                                           n_features = 7, n_permutations = 2000
+                                           )
+  print( plot_features(lime_explanations_orig_norm) )
+
+  } 
+dev.off()
+
+```
+
+
+
+## 23. LIME PRECONCLUSIONS 
+
+A known problem with LIME is that explanations may be inconsistent from one instance to the next, even when the instances are very similar to each other. 
 With this in mind, each instance we tested was tested at least 4 times (we manually ran this section over and over again) , and with a high enough number of permutations, we managed to get somewhat consistent results. 
 However, some of the results obtained from  LIME were heavily flawed as sometimes it would yield explanations that contradicted the result. 
 For some reason, when explaining false instances, LIME would tend to leave out sameStrand and sameDownStrand from the explanation.
@@ -1345,7 +1668,8 @@ For this particular use case, LIME was implement in models trained with the orig
 Several attempts were also made at modifying the arguments for the lime() function, such as all the possible permutations between bin_continuous, quantile_bins and use_density. 
 In the explain function, the number of permutations was increased from 10 to 2000 and the Euclidean and Gower distance functions were tested with kernel_widths ranging from 0.001 to 5 because we were not getting consistent 
 
-# F) SHAP Values 
+
+# VII) SHAP Values 
 Unlike LIME, SHAP offers consistent results, regardless of how you input the data. It also curious to see that the feature contributions in the 3 H2O models behave similarly. 
 
 ```{r}
@@ -1358,23 +1682,39 @@ head(SHAP_H2O2,10)
 SHAP_H2O3 <- h2o.predict_contributions(rfh2o_norm, as.h2o(sampleData_norm[,c(1:7)]))
 head(SHAP_H2O3,10)
 
+
 ```
 
-# G) Combined Insights
-By looking at LIME, SHAP, and PDPs(Random Forest Explorer), we can combine the insights a get 
+According to SHAP, Distance is one of the least important features, yet, the lime explanations earlier would suggest that distance is one of the major contributors to the classification decision. 
 
 
-## H2O PDP 
-H2O's current PDPs implementa
-
+# VIII) Combined Insights
 ```{r}
-h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "Distance", plot=TRUE, nbins=2)
-#h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "SS")
-#h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "Pos10wrtsRNAStart")
-#h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "DistTerm")
-#h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "Distance")
-#h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "DownDistance")
-#h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "sameStrand")
-#h2o.partialPlot(rfh2o, data = as.h2o(trainDataSet), cols = "sameDownStrand")
+#install.packages("shapper")
+library("shapper")
+library("randomForest")
+
+p_function <- function(model, data) predict(model, newdata = data, type = "prob")
+
+ive_rf <- individual_variable_effect(origRF, data = dataSetFull, predict_function = p_function,
+            new_observation = sampleData, nsamples = 50)
+
+
+ive_tree <- individual_variable_effect(origRF, data = dataSetFull, predict_function = p_function,
+            new_observation = x_train[1:2,], nsamples = 50)
+
+
+origRF <- randomForest( formula = Class ~.,
+                        data = dataSetFull, 
+                        mtry = 2, ntree = 400, importance = TRUE, 
+                        localImp = TRUE # This setting technically overwrites the importance setting set before, but it is needed for RFE to work. Otherwise, It won't be able to analyze the RF
+                       )
+
+?shap()
+shap1 <- shap(origRF, new_observation =  sampleData)
+
 ```
+
+
+
 
