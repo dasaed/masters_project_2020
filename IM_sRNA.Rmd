@@ -12,7 +12,6 @@ output:
 1. RANDOM FOREST EXPLAINER (or PDPs) = We applied RFE to our origRF model
 1. LIME = Here we actually begin to apply LIME to our RF models
 1. SHAP Values = We use the H2O library to generate the SHAP values for our H2O RF model
-1. PDPs = Similar to the previous section, we use the H2O library to generate the PDPs for the H2O RF model
 
 ## Introduction
 The goal of this project was to apply interpretability models to the random forest classifier in the PeerJ article ["Prioritizing bona fide bacterial small RNAs with machine learning classifiers"](https://peerj.com/articles/6304/) with the purposes of gaining deeper insights into the prioritization of bona fide bacterial sRNAs. 
@@ -35,7 +34,7 @@ The goal of this project was to apply interpretability models to the random fore
 * "DownDistance"  = distance to the closest reading frame on the RIGHT("downstream") side
 * "sameDownStrand" =  boolean, if transcription is going in the same direction as the RORF(Right Open Reading Frame)
 
-**Side note:*** When used the word original to refer to the RF model created in the base article, or to refer to models that were created(trained) in the same way as the base random forest model. 
+**Side note:*** We used the word original to refer to the RF model created in the base article, or to refer to models that were created(trained) in the same way as the base random forest model. 
 
 # I) PRE-SETUP
 This section is all about getting the libraries and data needed to run this R notebook. We will preprocess the data and load the original model. We start with some **OPTIONAL** memory cleaning (useful if you want to run this from R Studio and with a clean environment)
@@ -108,7 +107,9 @@ dataSetTrain_scaled <- cbind( dataSetTrain_scaled[,(1:4)],
 colnames(dataSetTrain_scaled) <- c("SS", "Pos10wrtsRNAStart", "DistTerm", "Distance", 
                                    "sameStrand", "DownDistance", "sameDownStrand", "ID", "Class")
 dataSetTrain_scaled[,"Class"] <- as.logical(dataSetTrain_scaled[,"Class"]) # Just making sure Class is taken a logical value
+write.csv(dataSetTrain_scaled, "./DataSets/combinedData_scaled.csv", row.names = FALSE)
 rbind( head(dataSetTrain_scaled,5), tail(dataSetTrain_scaled,5) )
+
 
 ```
 
@@ -126,6 +127,8 @@ dataSetTrain_norm$Distance <- normalize(dataSetTrain_norm$Distance)
 dataSetTrain_norm$DownDistance <- normalize(dataSetTrain_norm$DownDistance)
 dataSetTrain_norm[,"Class"] <- as.logical(dataSetTrain_norm[,"Class"]) # Just making sure Class is taken a logical value
 rbind( head(dataSetTrain_norm,5), tail(dataSetTrain_norm,5) ) 
+write.csv(dataSetTrain_norm, "./DataSets/combinedData_norm.csv", row.names = FALSE, col.names = TRUE)
+
 ```
 
 ### 3.4 Check for normality in the data
@@ -302,13 +305,14 @@ origRF <- readRDS("./RFModels/RF_classifier4sRNA.rds")
 Since some of the IM models required scaling or normalized data to properly function, we needed to create 2 new models in the same way as the one loaded in 4.1. 
 
 ```{r}
-tuneRF(dataSetTrainX[,c(1:7)], y = factor(dataSetTrainY[,2]), ntreeTry = 400, mtryStart = 2)
 set.seed(1234)
+tuneRF(dataSetTrainX[,c(1:7)], y = factor(dataSetTrainY[,2]), ntreeTry = 400, mtryStart = 2)
+
 origRF_scaled <- randomForest(x = dataSetTrain_scaled[,c(1:7)], y = factor(dataSetTrainY[,2]), mtry = 2, ntree = 400, importance = TRUE)
-saveRDS(origRF_scaled, "./RFModels/origRF_scaled.rds")
+#saveRDS(origRF_scaled, "./RFModels/origRF_scaled.rds")
 
 origRF_norm <- randomForest(x = dataSetTrain_norm[,c(1:7)], y = factor(dataSetTrainY[,2]), mtry = 2, ntree = 400, importance = TRUE)
-saveRDS(origRF_norm, "./RFModels/origRF_norm.rds")
+#saveRDS(origRF_norm, "./RFModels/origRF_norm.rds")
 
 
 ```
@@ -1605,49 +1609,48 @@ For this reason, we will use the normalized RF model as a proxy for the OrigRF m
 ```{r}
 
 origRF_norm_slt2_pred_ims <- subset(slt2data_norm, rownames(slt2data_norm) %in% rownames(slt2_im_data) )
+write.csv(origRF_norm_slt2_pred_ims, "./DataSets/slt2_data_to_analyze_normalized.csv", row.names = TRUE)
 slt2_test_samples <- rbind(slt2_im_data[,c(1:8)], origRF_norm_slt2_pred_ims)
 slt2_test_samples <- slt2_test_samples[order(row.names(slt2_test_samples)),]
 
 
 origRF_norm_lu_pred_ims <- subset(ludata_norm, rownames(ludata_norm) %in% rownames(lu_im_data) )
+write.csv(origRF_norm_lu_pred_ims, "./DataSets/lu_data_to_analyze_normalized.csv", row.names = TRUE)
 lu_test_samples <- rbind(lu_im_data[,c(1:8)], origRF_norm_lu_pred_ims)
 lu_test_samples <- lu_test_samples[order(row.names(lu_test_samples)),]
 
-write.csv(slt2_test_samples, "./DataSets/slt2_data_to_analyze.csv", row.names = TRUE, col.names = TRUE)
+write.csv(slt2_test_samples, "./DataSets/slt2_data_to_analyze.csv", row.names = TRUE)
+write.csv(lu_test_samples,   "./DataSets/lu_data_to_analyze.csv", row.names = TRUE)
 
-write.csv(lu_test_samples,   "./DataSets/lu_data_to_analyze.csv", row.names = TRUE, col.names = TRUE)
+all_test_samples <- rbind(slt2_test_samples,lu_test_samples)
 
+write.csv(all_test_samples, "./DataSets/all_im_data_to_analyze_normalized_and_unaltered.csv", row.names = TRUE)
+
+norm_test_samples <- rbind(origRF_norm_slt2_pred_ims, origRF_norm_lu_pred_ims)
+
+```
+
+
+
+```{r}
 lime_explainer_orig_norm <- lime(as.data.frame(trainData_norm[, c(1:7)]), origRF_norm,
                                    bin_continuous = TRUE, quantile_bins=FALSE, 
                                    use_density = TRUE, n_bins = 10)
 
-pdf("./Results/lime_slt2_explanations.pdf")
-for( i in 1:nrow(origRF_norm_slt2_pred_ims) ){
-  temp_df <- data.frame(origRF_norm_slt2_pred_ims[i,])
+#pdf("./Results/lime_explanations.pdf", paper = "legal", height =  11 ) # commented out so that a new PDF is not created
+for( i in 1:nrow(norm_test_samples) ){
+  temp_df <- data.frame(norm_test_samples[i,])
   temp_df <- temp_df[ rep(seq_len(nrow(temp_df)), each = 4), ]
   lime_explanations_orig_norm <- explain(as.data.frame(temp_df[,c(1:7)]), 
                                            lime_explainer_orig_norm, n_labels = 1, 
                                            n_features = 7, n_permutations = 2000
                                            )
-  print( plot_features(lime_explanations_orig_norm) )
-
+  print( plot_features(lime_explanations_orig_norm, ncol = 1))
   } 
-dev.off()
-
-pdf("./Results/lime_lu_explanations.pdf")
-for( i in 1:nrow(origRF_norm_lu_pred_ims) ){
-  temp_df <- data.frame(origRF_norm_lu_pred_ims[i,])
-  temp_df <- temp_df[ rep(seq_len(nrow(temp_df)), each = 4), ]
-  lime_explanations_orig_norm <- explain(as.data.frame(temp_df[,c(1:7)]), 
-                                           lime_explainer_orig_norm, n_labels = 1, 
-                                           n_features = 7, n_permutations = 2000
-                                           )
-  print( plot_features(lime_explanations_orig_norm) )
-
-  } 
-dev.off()
+#dev.off()
 
 ```
+
 
 
 
@@ -1673,6 +1676,7 @@ In the explain function, the number of permutations was increased from 10 to 200
 Unlike LIME, SHAP offers consistent results, regardless of how you input the data. It also curious to see that the feature contributions in the 3 H2O models behave similarly. 
 
 ```{r}
+
 SHAP_H2O1 <- h2o.predict_contributions(rfh2o, as.h2o(sampleData[,c(1:7)]))
 head(SHAP_H2O1,10)
 
@@ -1681,40 +1685,6 @@ head(SHAP_H2O2,10)
 
 SHAP_H2O3 <- h2o.predict_contributions(rfh2o_norm, as.h2o(sampleData_norm[,c(1:7)]))
 head(SHAP_H2O3,10)
-
-
 ```
 
 According to SHAP, Distance is one of the least important features, yet, the lime explanations earlier would suggest that distance is one of the major contributors to the classification decision. 
-
-
-# VIII) Combined Insights
-```{r}
-#install.packages("shapper")
-library("shapper")
-library("randomForest")
-
-p_function <- function(model, data) predict(model, newdata = data, type = "prob")
-
-ive_rf <- individual_variable_effect(origRF, data = dataSetFull, predict_function = p_function,
-            new_observation = sampleData, nsamples = 50)
-
-
-ive_tree <- individual_variable_effect(origRF, data = dataSetFull, predict_function = p_function,
-            new_observation = x_train[1:2,], nsamples = 50)
-
-
-origRF <- randomForest( formula = Class ~.,
-                        data = dataSetFull, 
-                        mtry = 2, ntree = 400, importance = TRUE, 
-                        localImp = TRUE # This setting technically overwrites the importance setting set before, but it is needed for RFE to work. Otherwise, It won't be able to analyze the RF
-                       )
-
-?shap()
-shap1 <- shap(origRF, new_observation =  sampleData)
-
-```
-
-
-
-
