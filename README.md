@@ -19,10 +19,12 @@ All the R files contain comments, which may serve one of following purposes:
   1. Provide explanations about the code or the reasoning behind certain functions
   1. To prevent certain lines from being run. For example, every time LIME runs, it generates different explanations, and so to prevent the lime\_explanations.pdf from being overwritten at every run, the corresponding lines were commented out.
 
+To actually run, I recommend running it in the following order:
+  1. RFE\_sRNA.R
+  2. shapper\_sRNA.R
+  3. IM\_sRNA.Rmd
 
-## Directory structure and files
+The lines that install the libraries have been commented out, so if you're missing libraries, I recommend modifying the corresponding file and uncommenting the lines so that the libraries are installed. 
 
 
-<div class="iframe_container">
-  <iframe src="./IM_sRNA.nb.html" frameborder="0" allowfullscreen="allowfullscreen"> </iframe>
-</div>
+
