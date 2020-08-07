@@ -1,4 +1,5 @@
-# This project was created in partial fulfillment of the requirements for the degree of Master of Science in Computer Science at Memorial University of Newfoundland.
+# Exploring Interpretability Models for Machine Learning in Prioritizing Bona Fide Bacterial Small RNAs Supplementary Material
+## This project was created in partial fulfillment of the requirements for the degree of Master of Science in Computer Science at Memorial University of Newfoundland.
 ### Author: Carlos Dasaed Salcedo Carreno
 ### Supervisor: Dr. Lourdes Pena-Castillo, PhD. 
 
